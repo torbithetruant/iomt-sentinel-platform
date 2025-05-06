@@ -1,0 +1,14 @@
+# Ignorer les certificats TLS/SSL
+server/certs/
+
+# Cache Python
+server/__pycache__/
+
+# Fichiers sensibles ou scripts locaux
+config/keycloak.sh
+
+server/launcher.sh
+
+# Logs
+server/logs/
+*.log
