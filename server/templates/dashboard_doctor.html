@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tableau de bord médical – Docteur</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial; margin: 40px; }
+        h2 { color: #004d99; }
+        canvas { margin-bottom: 40px; }
+        select { padding: 5px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h2>🩺 Tableau de bord interactif – Données capteurs</h2>
+
+    <p style="text-align: right;">
+        <a href="/">🏠 Accueil</a> | <a href="/logout">🚪 Déconnexion</a>
+    </p>    
+
+    <label for="device">Filtrer par capteur :</label>
+    <select id="device" onchange="filterByDevice()">
+        {% for d in device_ids %}
+            <option value="{{ d }}" {% if d == selected_device %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+    </select>
+
+    <br><br>
+
+    <canvas id="hrChart" width="800" height="300"></canvas>
+    <canvas id="spo2Chart" width="800" height="300"></canvas>
+
+    <script>
+        const timestamps = {{ timestamps|tojson }};
+        const heartRates = {{ heart_rates|tojson }};
+        const spo2Values = {{ spo2_values|tojson }};
+        const alerts = {{ alerts|tojson }};
+        const selectedDevice = "{{ selected_device }}";
+
+        const alertColors = alerts.map(a => a ? "red" : "blue");
+
+        new Chart(document.getElementById("hrChart"), {
+            type: "line",
+            data: {
+                labels: timestamps,
+                datasets: [{
+                    label: "Fréquence cardiaque",
+                    data: heartRates,
+                    borderColor: "blue",
+                    pointBackgroundColor: alertColors,
+                    backgroundColor: "rgba(0,0,255,0.1)",
+                    tension: 0.2
+                }]
+            }
+        });
+
+        new Chart(document.getElementById("spo2Chart"), {
+            type: "line",
+            data: {
+                labels: timestamps,
+                datasets: [{
+                    label: "SpO2 (%)",
+                    data: spo2Values,
+                    borderColor: "green",
+                    pointBackgroundColor: alertColors,
+                    backgroundColor: "rgba(0,255,0,0.1)",
+                    tension: 0.2
+                }]
+            }
+        });
+
+        function filterByDevice() {
+            const device = document.getElementById("device").value;
+            window.location.href = `/dashboard/doctor?device_id=${device}`;
+        }
+    </script>
+</body>
+</html>
