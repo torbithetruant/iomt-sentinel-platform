@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
-from keycloak_collector import collect_keycloak_logs_periodically
+from keycloak_file_monitor import monitor_keycloak_log
 from jose import jwt
 from log import logger
 import os
@@ -268,6 +268,12 @@ async def schedule_system_requests():
             await asyncio.sleep(60)
 
     asyncio.create_task(loop_requests())
+
+@app.on_event("startup")
+async def start_background_tasks():
+    asyncio.create_task(monitor_keycloak_log())
+    asyncio.create_task(schedule_system_requests())  # ta boucle de requêtes système
+
 
 # DASHBOARD
 
