@@ -1,10 +1,6 @@
-# iomt-sentinel-platform
-Plateforme de supervision sécurisée pour l’Internet des Objets Médicaux (IoMT) intégrant des capteurs de santé, une authentification IAM (Keycloak), des modèles de machine learning pour la détection d’anomalies, et une interface web de monitoring en temps réel.
+# 🛡️ iomt-sentinel-platform – FastAPI + Keycloak
 
-
-# 🛡️ IAM for IoMT – FastAPI + Keycloak
-
-Ce projet met en place un serveur sécurisé avec **FastAPI** pour gérer les accès à des capteurs de santé simulés, avec authentification via **Keycloak**.
+Ce projet met en place un serveur sécurisé avec **FastAPI** pour gérer les accès à des capteurs de santé simulés, avec authentification via **Keycloak**, des modèles de machine learning pour la détection d’anomalies, et une interface web de monitoring en temps réel.
 
 ---
 
