@@ -5,10 +5,15 @@ server/certs/
 server/__pycache__/
 
 # Fichiers sensibles ou scripts locaux
-config/keycloak.sh
+config/logs/
+*.log
 
+# Fichiers de lancement
 server/launcher.sh
 
 # Logs
 server/logs/
 *.log
+
+# Database
+server/data.db
