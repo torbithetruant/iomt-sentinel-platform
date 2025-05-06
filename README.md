@@ -16,6 +16,15 @@ Ce projet met en place un serveur sécurisé avec **FastAPI** pour gérer les ac
 
 ---
 
+### 1. Créer des certificats locaux à partir de cert.cnf
+
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout key.pem -out cert.pem -config cert.cnf -extensions req_ext
+```
+
+---
+
 ### 2. 📦 Installer les dépendances
 
 ```bash
