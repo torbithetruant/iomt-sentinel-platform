@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+sqlalchemy
+python-jose[cryptography]
+requests
+pydantic
+prometheus_client
+starlette
+nginx
+slowapi

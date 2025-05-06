@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tableau de bord système – IT</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial; margin: 40px; }
+        h2 { color: #333; }
+        canvas { margin-bottom: 40px; }
+        select { font-size: 16px; padding: 5px; margin-bottom: 20px; }
+        .status-ok { color: green; }
+        .status-bad { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h2>🛠️ Supervision Système – Capteurs</h2>
+
+    <p style="text-align: right;">
+        <a href="/">🏠 Accueil</a> | <a href="/logout">🚪 Déconnexion</a>
+    </p>
+
+    <label for="device">Filtrer par capteur :</label>
+    <select id="device" onchange="filterByDevice()">
+        {% for d in device_ids %}
+            <option value="{{ d }}" {% if d == selected_device %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+    </select>
+
+    <canvas id="diskChart" width="800" height="300"></canvas>
+    <canvas id="checksumChart" width="800" height="120"></canvas>
+    <canvas id="updateChart" width="800" height="120"></canvas>
+
+    <script>
+        const timestamps = {{ timestamps|tojson }};
+        const diskFree = {{ disk_free|tojson }};
+        const checksums = {{ checksum_valid|tojson }};
+        const updates = {{ update_required|tojson }};
+
+        new Chart(document.getElementById("diskChart"), {
+            type: "line",
+            data: {
+                labels: timestamps,
+                datasets: [{
+                    label: "Espace disque libre (%)",
+                    data: diskFree,
+                    borderColor: "blue",
+                    backgroundColor: "rgba(0,0,255,0.1)",
+                    tension: 0.2
+                }]
+            }
+        });
+
+        new Chart(document.getElementById("checksumChart"), {
+            type: "bar",
+            data: {
+                labels: timestamps,
+                datasets: [{
+                    label: "Checksum valide",
+                    data: checksums,
+                    backgroundColor: checksums.map(c => c ? "green" : "red")
+                }]
+            },
+            options: {
+                scales: { y: { ticks: { stepSize: 1, precision: 0 }, suggestedMin: 0, suggestedMax: 1 } }
+            }
+        });
+
+        new Chart(document.getElementById("updateChart"), {
+            type: "bar",
+            data: {
+                labels: timestamps,
+                datasets: [{
+                    label: "Mise à jour requise",
+                    data: updates,
+                    backgroundColor: updates.map(u => u ? "orange" : "green")
+                }]
+            },
+            options: {
+                scales: { y: { ticks: { stepSize: 1, precision: 0 }, suggestedMin: 0, suggestedMax: 1 } }
+            }
+        });
+
+        function filterByDevice() {
+            const device = document.getElementById("device").value;
+            window.location.href = `/dashboard/system?device_id=${device}`;
+        }
+    </script>
+</body>
+</html>

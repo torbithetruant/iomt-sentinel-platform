@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🩺 Données capteurs – Liste</title>
+</head>
+<body>
+    <h2>📋 Derniers enregistrements médicaux</h2>
+    <table border="1" cellpadding="5">
+        <tr>
+            <th>🆔 Capteur</th>
+            <th>❤️ FC</th>
+            <th>🫁 SpO₂</th>
+            <th>⏱️ Horodatage</th>
+            <th>⚠️ Alerte</th>
+        </tr>
+        {% for r in records %}
+        <tr>
+            <td>{{ r.device_id }}</td>
+            <td>{{ r.heart_rate }}</td>
+            <td>{{ r.spo2 }}</td>
+            <td>{{ r.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            <td>{{ "🚨" if r.alert else "✔️" }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    <p><a href="/">🏠 Accueil</a> | <a href="/logout">Déconnexion</a></p>
+</body>
+</html>

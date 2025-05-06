@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>📈 Métriques IoMT</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; }
+        h1 { color: #2c3e50; }
+        .box { background: #f0f0f0; padding: 20px; margin-top: 20px; border-radius: 8px; }
+        .label { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>📈 Tableau de bord – Métriques système</h1>
+    <div class="box">
+        <p><span class="label">🔴 Alertes en cours :</span> {{ alerts }}</p>
+        <p><span class="label">📡 Capteurs actifs :</span> {{ devices }}</p>
+    </div>
+
+    <p><a href="/">🏠 Accueil</a> | <a href="/logout">🚪 Déconnexion</a></p>
+</body>
+</html>

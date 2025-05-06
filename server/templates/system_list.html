@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🛠️ Données système – Liste</title>
+</head>
+<body>
+    <h2>📋 États système (brut)</h2>
+    <table border="1" cellpadding="5">
+        <tr>
+            <th>🆔 Capteur</th>
+            <th>🧮 OS</th>
+            <th>🔍 Checksum</th>
+            <th>📦 Update</th>
+            <th>💾 Disk (%)</th>
+            <th>🕒 Timestamp</th>
+        </tr>
+        {% for r in records %}
+        <tr>
+            <td>{{ r.device_id }}</td>
+            <td>{{ r.os_version }}</td>
+            <td>{{ "✔️" if r.checksum_valid else "❌" }}</td>
+            <td>{{ "⚠️" if r.update_required else "✔️" }}</td>
+            <td>{{ r.disk_free_percent }}</td>
+            <td>{{ r.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    <p><a href="/">🏠 Accueil</a> | <a href="/logout">Déconnexion</a></p>
+</body>
+</html>

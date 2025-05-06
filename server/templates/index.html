@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🏠 Accueil – IoMT Dashboard</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; }
+        h1 { color: #2c3e50; }
+        ul { list-style: none; padding: 0; }
+        li { margin-bottom: 10px; }
+        a { text-decoration: none; color: #007bff; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <h1>👋 Bienvenue, {{ username }}</h1>
+    <p>Voici ce que vous pouvez faire :</p>
+    <ul>
+        {% if "doctor" in roles %}
+        <li>🩺 <a href="/dashboard/doctor">Voir les alertes médicales</a></li>
+        <li>📋 <a href="/dashboard/doctor/list">Voir la liste brute des capteurs</a></li>
+        {% endif %}
+
+        {% if "it_admin" in roles %}
+        <li>🛠️ <a href="/dashboard/system">Superviser les systèmes</a></li>
+        <li>📄 <a href="/dashboard/system/list">Voir la liste brute des états système</a></li>
+        <li>📋 <a href="/dashboard/logs">Consulter les logs système</a></li>
+        <li>📈 <a href="/dashboard/metrics">Visualiser les métriques</a></li>
+        {% endif %}
+
+        {% if "patient" in roles %}
+        <li>📡 <em>Votre capteur est actuellement actif.</em></li>
+        {% endif %}
+    </ul>
+
+    <p><a href="/logout">🚪 Se déconnecter</a></p>
+</body>
+</html>
