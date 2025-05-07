@@ -14,6 +14,7 @@ from starlette.requests import Request as StarletteRequest
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 from keycloak_file_monitor import monitor_keycloak_log
 from jose import jwt
+from typing import Optional
 from log import logger
 import os
 import asyncio
@@ -76,22 +77,43 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(AccessLogMiddleware)
 templates = Jinja2Templates(directory="templates")
 
-
-
 # Modèle pour les données capteurs
 class SensorData(BaseModel):
     device_id: str
-    heart_rate: int
-    spo2: float
     timestamp: datetime = datetime.now(timezone.utc)
+    heart_rate: Optional[int] = None                   # BPM
+    spo2: Optional[float] = None                       # Saturation O2
+    temperature: Optional[float] = None                # °C
+    systolic_bp: Optional[int] = None                  # mmHg
+    diastolic_bp: Optional[int] = None                 # mmHg
+    respiration_rate: Optional[int] = None             # respirations/min
+    glucose_level: Optional[float] = None              # mg/dL ou mmol/L
+    ecg_summary: Optional[str] = None
 
 class SystemStatusData(BaseModel):
     device_id: str
+    timestamp: datetime = datetime.now(timezone.utc)
+    sensor_type: str                   # Ex: cardio, température, etc.
+    ip_address: str
+    firmware_version: str
+    status: int                        # actif / inactif / erreur
+    data_frequency_seconds: int       # fréquence d’envoi
     checksum_valid: bool
     os_version: str
     update_required: bool
     disk_free_percent: float
-    timestamp: datetime
+
+
+def get_known_devices():
+    db = SessionLocal()
+    devices_from_sensors = db.query(SensorRecord.device_id).distinct().all()
+    devices_from_system = db.query(SystemStatus.device_id).distinct().all()
+    db.close()
+
+    # Fusionner les deux sources et supprimer les doublons
+    all_devices = {d[0] for d in devices_from_sensors + devices_from_system}
+    return list(all_devices)
+
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
@@ -115,23 +137,25 @@ def index(request: Request):
 @app.post("/api/sensor")
 @limiter.limit("10/minute")
 def receive_sensor_data(request: Request, data: SensorData, user=Depends(require_role("patient"))):
-    is_alert = False
-    if data.heart_rate > 100 or data.spo2 < 95:
-        is_alert = True
 
     db = SessionLocal()
     record = SensorRecord(
         device_id=data.device_id,
+        timestamp=data.timestamp,
         heart_rate=data.heart_rate,
         spo2=data.spo2,
-        timestamp=data.timestamp,
-        alert=is_alert
+        temperature=data.temperature,
+        systolic_bp=data.systolic_bp,
+        diastolic_bp=data.diastolic_bp,
+        respiration_rate=data.respiration_rate,
+        glucose_level=data.glucose_level,
+        ecg_summary=data.ecg_summary
     )
     db.add(record)
     db.commit()
     db.close()
-    logger.info(f"📡 Sensor data received from {data.device_id} by {user['preferred_username']}, HR={data.heart_rate}, SpO2={data.spo2}, alert={is_alert}")
-    return {"status": "ok", "alert": is_alert}
+    logger.info(f"📡 Sensor data received from {data.device_id} by {user['preferred_username']}")
+    return {"status": "ok"}
 
 
 @app.post("/api/system-status")
@@ -142,6 +166,11 @@ def post_system_status(request: Request, data: SystemStatusData, user=Depends(re
     entry = SystemStatus(
         device_id=data.device_id,
         timestamp=data.timestamp,
+        sensor_type=data.sensor_type,
+        ip_address=data.ip_address,
+        firmware_version=data.firmware_version,
+        status=data.status,
+        data_frequency_seconds=data.data_frequency_seconds,
         checksum_valid=data.checksum_valid,
         os_version=data.os_version,
         update_required=data.update_required,
@@ -232,8 +261,6 @@ def logout():
     response.delete_cookie("access_token")
     return response
 
-# Liste des capteurs connus (tu peux la rendre dynamique plus tard)
-KNOWN_DEVICES = ["raspi_001", "raspi_002", "raspi_003"]
 
 # Script lancement du serveur
 @app.on_event("startup")
@@ -259,7 +286,7 @@ async def schedule_system_requests():
 
 
             # 📡 2. Envoi de nouvelles requêtes
-            for device_id in KNOWN_DEVICES:
+            for device_id in get_known_devices():
                 logger.debug(f"📡 System check request sent to {device_id}")
                 db.add(SystemRequest(device_id=device_id))
             db.commit()
@@ -269,10 +296,10 @@ async def schedule_system_requests():
 
     asyncio.create_task(loop_requests())
 
-@app.on_event("startup")
-async def start_background_tasks():
-    asyncio.create_task(monitor_keycloak_log())
-    asyncio.create_task(schedule_system_requests())  # ta boucle de requêtes système
+# @app.on_event("startup")
+# async def start_background_tasks():
+    # asyncio.create_task(monitor_keycloak_log())
+    # asyncio.create_task(schedule_system_requests())  # ta boucle de requêtes système
 
 
 # DASHBOARD
@@ -312,14 +339,24 @@ def dashboard_doctor(request: Request, device_id: str = None):
     timestamps = [r.timestamp.strftime("%H:%M:%S") for r in reversed(records)]
     heart_rates = [r.heart_rate for r in reversed(records)]
     spo2_values = [r.spo2 for r in reversed(records)]
-    alerts = [r.alert for r in reversed(records)]
+    temp_values = [r.temperature for r in reversed(records)]
+    systolic_bp = [r.systolic_bp for r in reversed(records)]
+    diastolic_bp = [r.diastolic_bp for r in reversed(records)]
+    respiration_rate = [r.respiration_rate for r in reversed(records)]
+    glucose_level = [r.glucose_level for r in reversed(records)]
+    ecg_summary = [r.ecg_summary for r in reversed(records)]
 
     return templates.TemplateResponse("dashboard_doctor.html", {
         "request": request,
         "timestamps": timestamps,
         "heart_rates": heart_rates,
         "spo2_values": spo2_values,
-        "alerts": alerts,
+        "temp_values": temp_values,
+        "systolic_bp": systolic_bp,
+        "diastolic_bp": diastolic_bp,
+        "respiration_rate": respiration_rate,
+        "glucose_level": glucose_level,
+        "ecg_summary": ecg_summary,
         "device_ids": device_ids,
         "selected_device": selected_device
     })
@@ -380,6 +417,13 @@ def dashboard_system(request: Request, device_id: str = None):
     disk_free = [r.disk_free_percent for r in reversed(records)]
     checksum_valid = [1 if r.checksum_valid else 0 for r in reversed(records)]
     update_required = [1 if r.update_required else 0 for r in reversed(records)]
+    sensor_type = [r.sensor_type for r in reversed(records)]
+    ip_address = [r.ip_address for r in reversed(records)]
+    firmware_version = [r.firmware_version for r in reversed(records)]
+    status = [r.status for r in reversed(records)]
+    data_frequency = [r.data_frequency_seconds for r in reversed(records)]
+    os_versions = [r.os_version for r in reversed(records)]
+
 
     return templates.TemplateResponse("system_dashboard.html", {
         "request": request,
@@ -387,6 +431,12 @@ def dashboard_system(request: Request, device_id: str = None):
         "disk_free": disk_free,
         "checksum_valid": checksum_valid,
         "update_required": update_required,
+        "sensor_type": sensor_type,
+        "ip_address": ip_address,
+        "firmware_version": firmware_version,
+        "status": status,
+        "data_frequency": data_frequency,
+        "os_versions": os_versions,
         "device_ids": device_ids,
         "selected_device": selected_device
     })
@@ -453,20 +503,26 @@ def view_logs(request: Request):
 def health_check():
     return "OK"
 
-# Métriques Prometheus
-sensor_alerts = Counter("iot_sensor_alerts_total", "Nombre total d'alertes détectées")
-active_devices = Gauge("iot_active_devices", "Nombre de capteurs actifs")
+# 📊 Prometheus metrics
+active_devices = Gauge("active_iomt_devices", "Nombre de capteurs uniques ayant envoyé des données")
+records_total = Gauge("sensor_records_total", "Nombre total de mesures de capteurs")
+system_entries = Gauge("system_status_total", "Nombre total de rapports système")
 
 @app.get("/metrics")
 def metrics():
-    # 📊 Mise à jour manuelle avant export
     db = SessionLocal()
     try:
+        # Nombre de capteurs uniques (présence dans la base)
         active = db.query(SensorRecord.device_id).distinct().count()
         active_devices.set(active)
 
-        alerts = db.query(SensorRecord).filter(SensorRecord.alert == True).count()
-        sensor_alerts._value.set(alerts)  # 🔁 MAJ manuelle (Counter ne décrémente pas normalement)
+        # Nombre total de données reçues
+        total_sensor = db.query(SensorRecord).count()
+        records_total.set(total_sensor)
+
+        # Nombre total de statuts système
+        total_system = db.query(SystemStatus).count()
+        system_entries.set(total_system)
     finally:
         db.close()
 
@@ -490,12 +546,14 @@ def metrics_dashboard(request: Request):
         })
 
     db = SessionLocal()
-    alerts = db.query(SensorRecord).filter(SensorRecord.alert == True).count()
     active = db.query(SensorRecord.device_id).distinct().count()
+    sensor_count = db.query(SensorRecord).count()
+    sys_count = db.query(SystemStatus).count()
     db.close()
 
     return templates.TemplateResponse("metrics_dashboard.html", {
         "request": request,
-        "alerts": alerts,
-        "devices": active
+        "devices": active,
+        "sensor_count": sensor_count,
+        "sys_count": sys_count
     })

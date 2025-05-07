@@ -1,77 +1,76 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Tableau de bord médical – Docteur</title>
+    <title>🩺 Données de santé – {{ selected_device }}</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { font-family: Arial; margin: 40px; }
-        h2 { color: #004d99; }
-        canvas { margin-bottom: 40px; }
-        select { padding: 5px; font-size: 16px; }
-    </style>
 </head>
 <body>
-    <h2>🩺 Tableau de bord interactif – Données capteurs</h2>
+<h2>🩺 Capteur : {{ selected_device }}</h2>
 
-    <p style="text-align: right;">
-        <a href="/">🏠 Accueil</a> | <a href="/logout">🚪 Déconnexion</a>
-    </p>    
-
-    <label for="device">Filtrer par capteur :</label>
-    <select id="device" onchange="filterByDevice()">
-        {% for d in device_ids %}
-            <option value="{{ d }}" {% if d == selected_device %}selected{% endif %}>{{ d }}</option>
+<form method="get">
+    <label>Choisir un capteur :</label>
+    <select name="device_id" onchange="this.form.submit()">
+        {% for device in device_ids %}
+            <option value="{{ device }}" {% if device == selected_device %}selected{% endif %}>{{ device }}</option>
         {% endfor %}
     </select>
+</form>
 
-    <br><br>
+<canvas id="healthChart" height="120"></canvas>
 
-    <canvas id="hrChart" width="800" height="300"></canvas>
-    <canvas id="spo2Chart" width="800" height="300"></canvas>
-
-    <script>
-        const timestamps = {{ timestamps|tojson }};
-        const heartRates = {{ heart_rates|tojson }};
-        const spo2Values = {{ spo2_values|tojson }};
-        const alerts = {{ alerts|tojson }};
-        const selectedDevice = "{{ selected_device }}";
-
-        const alertColors = alerts.map(a => a ? "red" : "blue");
-
-        new Chart(document.getElementById("hrChart"), {
-            type: "line",
-            data: {
-                labels: timestamps,
-                datasets: [{
-                    label: "Fréquence cardiaque",
-                    data: heartRates,
-                    borderColor: "blue",
-                    pointBackgroundColor: alertColors,
-                    backgroundColor: "rgba(0,0,255,0.1)",
-                    tension: 0.2
-                }]
+<script>
+const ctx = document.getElementById('healthChart').getContext('2d');
+const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: {{ timestamps | tojson }},
+        datasets: [
+            {
+                label: 'FC (BPM)',
+                data: {{ heart_rates | tojson }},
+                borderWidth: 2
+            },
+            {
+                label: 'SpO₂ (%)',
+                data: {{ spo2_values | tojson }},
+                borderWidth: 2
+            },
+            {
+                label: 'Température (°C)',
+                data: {{ temp_values | tojson }},
+                borderWidth: 2
+            },
+            {
+                label: 'Tension systolique',
+                data: {{ systolic_bp | tojson }},
+                borderWidth: 2
+            },
+            {
+                label: 'Tension diastolique',
+                data: {{ diastolic_bp | tojson }},
+                borderWidth: 2
+            },
+            {
+                label: 'Respiration/min',
+                data: {{ respiration_rate | tojson }},
+                borderWidth: 2
+            },
+            {
+                label: 'Glycémie (mg/dL)',
+                data: {{ glucose_level | tojson }},
+                borderWidth: 2
             }
-        });
-
-        new Chart(document.getElementById("spo2Chart"), {
-            type: "line",
-            data: {
-                labels: timestamps,
-                datasets: [{
-                    label: "SpO2 (%)",
-                    data: spo2Values,
-                    borderColor: "green",
-                    pointBackgroundColor: alertColors,
-                    backgroundColor: "rgba(0,255,0,0.1)",
-                    tension: 0.2
-                }]
-            }
-        });
-
-        function filterByDevice() {
-            const device = document.getElementById("device").value;
-            window.location.href = `/dashboard/doctor?device_id=${device}`;
+        ]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: { beginAtZero: true }
         }
-    </script>
+    }
+});
+</script>
+
+<br><p><a href="/">🏠 Accueil</a> | <a href="/logout">Déconnexion</a></p>
 </body>
 </html>

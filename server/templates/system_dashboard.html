@@ -1,90 +1,65 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Tableau de bord système – IT</title>
+    <title>🛠️ Supervision système – {{ selected_device }}</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { font-family: Arial; margin: 40px; }
-        h2 { color: #333; }
-        canvas { margin-bottom: 40px; }
-        select { font-size: 16px; padding: 5px; margin-bottom: 20px; }
-        .status-ok { color: green; }
-        .status-bad { color: red; font-weight: bold; }
-    </style>
 </head>
 <body>
+<h2>🛠️ Capteur : {{ selected_device }}</h2>
 
-    <h2>🛠️ Supervision Système – Capteurs</h2>
-
-    <p style="text-align: right;">
-        <a href="/">🏠 Accueil</a> | <a href="/logout">🚪 Déconnexion</a>
-    </p>
-
-    <label for="device">Filtrer par capteur :</label>
-    <select id="device" onchange="filterByDevice()">
-        {% for d in device_ids %}
-            <option value="{{ d }}" {% if d == selected_device %}selected{% endif %}>{{ d }}</option>
+<form method="get">
+    <label>Choisir un capteur :</label>
+    <select name="device_id" onchange="this.form.submit()">
+        {% for device in device_ids %}
+            <option value="{{ device }}" {% if device == selected_device %}selected{% endif %}>{{ device }}</option>
         {% endfor %}
     </select>
+</form>
 
-    <canvas id="diskChart" width="800" height="300"></canvas>
-    <canvas id="checksumChart" width="800" height="120"></canvas>
-    <canvas id="updateChart" width="800" height="120"></canvas>
+<ul>
+    <li>Type de capteur : <strong>{{ sensor_type[-1] }}</strong></li>
+    <li>IP : <strong>{{ ip_address[-1] }}</strong></li>
+    <li>Firmware : <strong>{{ firmware_version[-1] }}</strong></li>
+    <li>Version OS : <strong>{{ os_versions[-1] }}</strong></li>
+    <li>Statut : <strong>{{ status[-1] }}</strong></li>
+    <li>Fréquence d'envoi : <strong>{{ data_frequency[-1] }}s</strong></li>
+</ul>
 
-    <script>
-        const timestamps = {{ timestamps|tojson }};
-        const diskFree = {{ disk_free|tojson }};
-        const checksums = {{ checksum_valid|tojson }};
-        const updates = {{ update_required|tojson }};
+<canvas id="sysChart" height="100"></canvas>
 
-        new Chart(document.getElementById("diskChart"), {
-            type: "line",
-            data: {
-                labels: timestamps,
-                datasets: [{
-                    label: "Espace disque libre (%)",
-                    data: diskFree,
-                    borderColor: "blue",
-                    backgroundColor: "rgba(0,0,255,0.1)",
-                    tension: 0.2
-                }]
-            }
-        });
-
-        new Chart(document.getElementById("checksumChart"), {
-            type: "bar",
-            data: {
-                labels: timestamps,
-                datasets: [{
-                    label: "Checksum valide",
-                    data: checksums,
-                    backgroundColor: checksums.map(c => c ? "green" : "red")
-                }]
+<script>
+const ctx = document.getElementById('sysChart').getContext('2d');
+const sysChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: {{ timestamps | tojson }},
+        datasets: [
+            {
+                label: 'Disque libre (%)',
+                data: {{ disk_free | tojson }},
+                borderWidth: 2
             },
-            options: {
-                scales: { y: { ticks: { stepSize: 1, precision: 0 }, suggestedMin: 0, suggestedMax: 1 } }
-            }
-        });
-
-        new Chart(document.getElementById("updateChart"), {
-            type: "bar",
-            data: {
-                labels: timestamps,
-                datasets: [{
-                    label: "Mise à jour requise",
-                    data: updates,
-                    backgroundColor: updates.map(u => u ? "orange" : "green")
-                }]
+            {
+                label: 'Checksum valide',
+                data: {{ checksum_valid | tojson }},
+                borderWidth: 2
             },
-            options: {
-                scales: { y: { ticks: { stepSize: 1, precision: 0 }, suggestedMin: 0, suggestedMax: 1 } }
+            {
+                label: 'Mise à jour requise',
+                data: {{ update_required | tojson }},
+                borderWidth: 2
             }
-        });
-
-        function filterByDevice() {
-            const device = document.getElementById("device").value;
-            window.location.href = `/dashboard/system?device_id=${device}`;
+        ]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: { beginAtZero: true }
         }
-    </script>
+    }
+});
+</script>
+
+<br><p><a href="/">🏠 Accueil</a> | <a href="/logout">Déconnexion</a></p>
 </body>
 </html>

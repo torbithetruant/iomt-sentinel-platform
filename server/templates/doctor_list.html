@@ -11,7 +11,11 @@
             <th>❤️ FC</th>
             <th>🫁 SpO₂</th>
             <th>⏱️ Horodatage</th>
-            <th>⚠️ Alerte</th>
+            <th>Température</th>
+            <th>PA</th>
+            <th>Resp./min</th>
+            <th>Glycémie</th>
+            <th>ECG</th>
         </tr>
         {% for r in records %}
         <tr>
@@ -19,7 +23,11 @@
             <td>{{ r.heart_rate }}</td>
             <td>{{ r.spo2 }}</td>
             <td>{{ r.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-            <td>{{ "🚨" if r.alert else "✔️" }}</td>
+            <td>{{ r.temperature }}</td>
+            <td>{{ r.systolic_bp }} / {{ r.diastolic_bp }}</td>
+            <td>{{ r.respiration_rate }}</td>
+            <td>{{ r.glucose_level }}</td>
+            <td>{{ r.ecg_summary }}</td>
         </tr>
         {% endfor %}
     </table>
