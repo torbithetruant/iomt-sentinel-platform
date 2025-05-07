@@ -1,4 +1,5 @@
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sqlalchemy.orm import Session
 from models import SessionLocal, SensorRecord, SystemStatus
 import pandas as pd
@@ -14,6 +15,8 @@ def train_health_model():
         return
 
     data = pd.DataFrame([{
+        "device_id": r.device_id,
+        "timestamp": r.timestamp,
         "heart_rate": r.heart_rate,
         "spo2": r.spo2,
         "temperature": r.temperature,
@@ -38,7 +41,18 @@ def train_health_model():
 
     data["label"] = data.apply(is_anomalous, axis=1)
 
-    X = data.drop(columns=["label", "ecg_summary"])
+    # Enregistrer en csv sous ../datasets/
+    data.to_csv("../datasets/sensor_data.csv", index=False)
+
+    cat_cols = ['device_id', 'timestamp', 'ecg_summary']
+    num_cols = ['heart_rate', 'spo2', 'temperature', 'systolic_bp', 'diastolic_bp', 'respiration_rate', 'glucose_level']
+
+    # Encodage
+    le_dict = {col: LabelEncoder().fit(data[col]) for col in cat_cols}
+    for col, le in le_dict.items():
+        data[col] = le.transform(data[col])
+
+    X = data[cat_cols + num_cols]
     y = data["label"]
 
     model = RandomForestClassifier(n_estimators=100, random_state=42)
@@ -56,6 +70,12 @@ def train_system_model():
         return
 
     data = pd.DataFrame([{
+        "device_id": r.device_id,
+        "timestamp": r.timestamp,
+        "sensor_type": r.sensor_type,
+        "ip_address": r.ip_address,
+        "firmware_version": r.firmware_version,
+        "data_frequency_seconds": r.data_frequency_seconds,
         "disk_free_percent": r.disk_free_percent,
         "update_required": int(r.update_required),
         "checksum_valid": int(r.checksum_valid),
@@ -72,7 +92,18 @@ def train_system_model():
 
     data["label"] = data.apply(is_system_anomaly, axis=1)
 
-    X = data.drop(columns=["label"])
+    # Enregistrer en csv sous ../datasets/
+    data.to_csv("../datasets/system_status.csv", index=False)
+
+    cat_cols = ['device_id', 'timestamp', 'sensor_type', 'ip_address', 'firmware_version']
+    num_cols = ['data_frequency_seconds', 'disk_free_percent', 'update_required', 'checksum_valid', 'status']
+
+    # Encodage
+    le_dict = {col: LabelEncoder().fit(data[col]) for col in cat_cols}
+    for col, le in le_dict.items():
+        data[col] = le.transform(data[col])
+
+    X = data[cat_cols + num_cols]
     y = data["label"]
 
     model = RandomForestClassifier(n_estimators=100, random_state=42)
