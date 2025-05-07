@@ -1,93 +1,82 @@
-# 🛡️ iomt-sentinel-platform – FastAPI + Keycloak
+# 🛡️ IoMT Sentinel Platform
 
-Ce projet met en place un serveur sécurisé avec **FastAPI** pour gérer les accès à des capteurs de santé simulés, avec authentification via **Keycloak**, des modèles de machine learning pour la détection d’anomalies, et une interface web de monitoring en temps réel.
+**IoMT Sentinel** est une plateforme sécurisée de supervision de capteurs médicaux (réels ou simulés), combinant :
 
----
-
-## ⚙️ Prérequis
-
-- Python ≥ 3.9
-- Docker + Docker Compose
-- pip
-
----
-
-## 🚀 Étapes de mise en place
+- **FastAPI** pour le backend
+- **Keycloak** pour la gestion des identités et rôles
+- **NGINX** pour le proxy HTTPS + sécurité
+- **Machine Learning** (Random Forest, Isolation Forest) pour la détection d’anomalies
+- **Dashboards dynamiques** avec Jinja2 + Chart.js
+- **Prometheus** pour exporter des métriques de supervision
 
 ---
 
-### 1. Créer des certificats locaux à partir de cert.cnf
+## 🔍 Fonctionnalités
 
-```bash
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout key.pem -out cert.pem -config cert.cnf -extensions req_ext
-```
-
----
-
-### 2. 📦 Installer les dépendances
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
+- Authentification JWT avec rôles (`patient`, `doctor`, `it_admin`)
+- Envoi de données santé et système par 100 capteurs simulés
+- Détection automatique d’anomalies (modèles ML supervisés)
+- Tableaux de bord filtrés selon le rôle
+- Export Prometheus (`/metrics`) et dashboard `metrics`
+- Logs applicatifs complets (accès, anomalies, erreurs, connexions)
+- Surveillance système par NGINX avec health-check
 
 ---
 
-### 3. 🔐 Lancer Keycloak
+## 🚀 Lancement rapide
 
-```bash
-docker run -p 8080:8080 \
--v keycloak_data:/opt/keycloak/data \
--e KEYCLOAK_ADMIN=admin \
--e KEYCLOAK_ADMIN_PASSWORD=admin \
-quay.io/keycloak/keycloak:24.0.1 start-dev
-```
-
-Ou sinon lancer direct :
-
-```bash
-./keycloack.sh
-```
+1. Suivre le guide complet dans [`INSTALL.md`](INSTALL.md)
+2. Démarrer Keycloak (`./config/keycloak.sh`)
+3. Lancer le backend FastAPI
+4. Lancer les capteurs simulés (`python sensors/simulator_multi.py`)
+5. Accéder à : [https://localhost:8000](https://localhost:8000)
 
 ---
 
-### 4. ⚙️ Configurer Keycloak (http://localhost:8080)
+## 🧠 Modèles de Machine Learning
 
-Les éléments doivent être crées :
-- **Realm** : `iot_realm`
-- **Client** : `iot_backend` (Confidential, OpenID Connect)
-- **Activé** : Standard Flow, Direct Access Grants
-- **Rôle** : `device`, `doctor`, `it_admin`
-- **Utilisateur** : `role_user` / `test123` (mot de passe non temporaire)
-- **Client Secret** : à copier dans `simulator_multi.py`
+Deux modèles sont entraînés automatiquement :
+
+- **RandomForestClassifier** : données capteurs santé et données système (disque, MAJ, checksum)
+
+Les scores d’anomalie sont exportables, et un futur LLM pourra superviser ou ajuster les décisions.
 
 ---
 
-### 5. 🚀 Lancer le serveur FastAPI
+## 🔐 Sécurité
 
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000 \
-  --ssl-keyfile=certs/key.pem --ssl-certfile=certs/cert.pem
-```
-
-Accès Swagger : [https://localhost:8000/docs](https://localhost:8000/docs)
-
----
-
-### 6. 🛰️ Lancer le simulateur de capteur
-
-```bash
-python simulator_multi.py
-```
+- Certificats TLS via OpenSSL (certificat local autosigné)
+- Authentification JWT
+- Limitation de débit (SlowAPI)
+- Logs détaillés : accès, erreurs, alertes
+- Accès par rôle
+- NGINX avec redirection HTTPS + Health-check
 
 ---
 
-## ✅ Résultat
+## ✅ Dashboard par rôle
 
-- Les capteurs envoient des données au backend toutes les Xs
-- Le serveur vérifie les tokens et stocke les données
-- Il y a différents dashboard accessible depuis https://localhost:8000/
+| Rôle       | URL                         | Contenu                                  |
+|------------|-----------------------------|------------------------------------------|
+| `doctor`   | `/dashboard/doctor`         | Signes vitaux des patients               |
+| `it_admin` | `/dashboard/system`         | État système des capteurs                |
+| `it_admin` | `/dashboard/metrics`        | Prometheus : nombre de devices, etc.     |
 
 ---
+
+## 🛠️ Contribuer
+
+- Ajouter un LLM superviseur via `/ml/supervisor.py`
+- Intégrer Grafana pour la visualisation
+- Ajouter une base NoSQL pour scaler
+- Étendre les types de capteurs
+
+---
+
+## 📃 Licence
+
+Ce projet est open-source, libre pour usage académique ou R&D.
+
+---
+
+**Développé pour un projet de recherche en cybersécurité des IoMT.**
