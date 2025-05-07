@@ -13,6 +13,11 @@
             <th>📦 Update</th>
             <th>💾 Disk (%)</th>
             <th>🕒 Timestamp</th>
+            <th>Type de capteur</th>
+            <th>Adresse IP</th>
+            <th>Version du firmware</th>
+            <th>Statut</th>
+            <th>Fréquence de données (s)</th>
         </tr>
         {% for r in records %}
         <tr>
@@ -22,6 +27,11 @@
             <td>{{ "⚠️" if r.update_required else "✔️" }}</td>
             <td>{{ r.disk_free_percent }}</td>
             <td>{{ r.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            <td>{{ r.sensor_type }}</td>
+            <td>{{ r.ip_address }}</td>
+            <td>{{ r.firmware_version }}</td>
+            <td>{{ r.status }}</td>
+            <td>{{ r.data_frequency }}</td>
         </tr>
         {% endfor %}
     </table>
