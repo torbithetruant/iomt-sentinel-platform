@@ -3,7 +3,6 @@ import threading
 import time
 import requests
 from datetime import datetime
-import uuid
 import ipaddress
 
 # === CONFIGURATION GLOBALE ===
@@ -16,6 +15,13 @@ CLIENT_SECRET = "VGNth5jUVhXhCx9qmgarzKPwcdhtwsF6"
 
 # === SIMULATION PARAMS ===
 CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 101)]
+
+PATIENT_PROFILES = [
+    {"type": "sportif", "base_hr": 60, "base_spo2": 98, "base_temp": 36.3, "risk": 0.05},
+    {"type": "standard", "base_hr": 75, "base_spo2": 97, "base_temp": 36.8, "risk": 0.1},
+    {"type": "senior", "base_hr": 85, "base_spo2": 95, "base_temp": 37.0, "risk": 0.2},
+    {"type": "diabétique", "base_hr": 80, "base_spo2": 96, "base_temp": 36.7, "risk": 0.25}
+]
 
 def random_ip():
     return str(ipaddress.IPv4Address(random.randint(0xC0A80001, 0xC0A8FFFF)))  # 192.168.0.1 - 192.168.255.255
@@ -40,48 +46,57 @@ def get_token(username, password="test123"):
         print(f"❌ Connection error for {username}: {e}")
         return None
 
-def generate_sensor_data(device_id, anomaly=False):
+def vary(val, pct=0.05):
+    return round(val * (1 + random.uniform(-pct, pct)), 1)
+
+def generate_sensor_data(device_id, anomaly=False, profile=None):
+    base = profile
+
     data = {
         "device_id": device_id,
         "timestamp": datetime.now().isoformat(),
-        "heart_rate": random.randint(60, 100),
-        "spo2": round(random.uniform(95.0, 99.5), 1),
-        "temperature": round(random.uniform(36.0, 38.0), 1),
-        "systolic_bp": random.randint(110, 130),
-        "diastolic_bp": random.randint(70, 85),
-        "respiration_rate": random.randint(12, 18),
-        "glucose_level": round(random.uniform(4.5, 6.5), 1),
-        "ecg_summary": "Normal sinus rhythm"
+        "heart_rate": random.randint(base["base_hr"] - 5, base["base_hr"] + 10),
+        "spo2": round(random.uniform(base["base_spo2"] - 1, base["base_spo2"] + 1.5), 1),
+        "temperature": round(random.uniform(base["base_temp"] - 0.3, base["base_temp"] + 0.4), 1),
+        "systolic_bp": random.randint(110, 135),
+        "diastolic_bp": random.randint(70, 90),
+        "respiration_rate": random.randint(12, 20),
+        "glucose_level": round(random.uniform(4.5, 7.0), 1),
+        "ecg_summary": "Normal sinus rhythm",
+        "label": 0
     }
 
     if anomaly:
-        features = ["heart_rate", "spo2", "systolic_bp", "diastolic_bp", "respiration_rate", "glucose_level"]
-        selected = random.sample(features, k=random.randint(1, 3))
+        anomaly_types = ["tachy", "hypoxie", "hyperBP", "hypoBP", "glycémie", "resp"]
+        selected = random.sample(anomaly_types, k=random.randint(1, 2))
 
-        if "heart_rate" in selected:
-            data["heart_rate"] = random.randint(120, 180)
-            # 30% de chance que l’ECG montre aussi une anomalie si la FC est anormale
-            if random.random() < 0.3:
+        if "tachy" in selected:
+            data["heart_rate"] = random.randint(110, 150)
+            if random.random() < 0.5:
                 data["ecg_summary"] = "Anomalous pattern"
 
-        if "spo2" in selected:
+        if "hypoxie" in selected:
             data["spo2"] = round(random.uniform(90.0, 94.5), 1)
 
-        if "systolic_bp" in selected:
+        if "hyperBP" in selected:
             data["systolic_bp"] = random.randint(140, 160)
-
-        if "diastolic_bp" in selected:
             data["diastolic_bp"] = random.randint(90, 100)
 
-        if "respiration_rate" in selected:
-            data["respiration_rate"] = random.randint(20, 25)
+        if "hypoBP" in selected:
+            data["systolic_bp"] = random.randint(90, 105)
+            data["diastolic_bp"] = random.randint(60, 70)
 
-        if "glucose_level" in selected:
-            data["glucose_level"] = round(random.uniform(7.5, 11.0), 1)
+        if "glycémie" in selected:
+            data["glucose_level"] = round(random.uniform(7.5, 10.5), 1)
 
-        # 10% de chance d’avoir une anomalie ECG même sans heart_rate anormal
+        if "resp" in selected:
+            data["respiration_rate"] = random.randint(22, 28)
+
+        # Faux positifs ECG
         if data["ecg_summary"] == "Normal sinus rhythm" and random.random() < 0.1:
             data["ecg_summary"] = "Anomalous pattern"
+        
+        data["label"] = 1
 
     return data
 
@@ -120,6 +135,8 @@ def generate_system_data(device_id, anomaly=False):
     return data
 
 def simulate_capteur(capteur):
+    profile = random.choice(PATIENT_PROFILES)
+
     token = get_token(capteur["username"])
     if not token:
         return
@@ -130,8 +147,8 @@ def simulate_capteur(capteur):
     }
 
     while True:
-        anomaly = random.random() < 0.1  # 10% anomalie
-        sensor_data = generate_sensor_data(capteur["device_id"], anomaly)
+        anomaly = random.random() < 0.2  # 20% anomalie
+        sensor_data = generate_sensor_data(capteur["device_id"], anomaly, profile)
         system_data = generate_system_data(capteur["device_id"], anomaly)
 
         try:

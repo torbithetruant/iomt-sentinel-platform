@@ -89,6 +89,7 @@ class SensorData(BaseModel):
     respiration_rate: Optional[int] = None             # respirations/min
     glucose_level: Optional[float] = None              # mg/dL ou mmol/L
     ecg_summary: Optional[str] = None
+    label: Optional[int] = None                        # 0: normal, 1: anomalie
 
 class SystemStatusData(BaseModel):
     device_id: str
@@ -149,7 +150,8 @@ def receive_sensor_data(request: Request, data: SensorData, user=Depends(require
         diastolic_bp=data.diastolic_bp,
         respiration_rate=data.respiration_rate,
         glucose_level=data.glucose_level,
-        ecg_summary=data.ecg_summary
+        ecg_summary=data.ecg_summary,
+        label=data.label
     )
     db.add(record)
     db.commit()
@@ -345,6 +347,7 @@ def dashboard_doctor(request: Request, device_id: str = None):
     respiration_rate = [r.respiration_rate for r in reversed(records)]
     glucose_level = [r.glucose_level for r in reversed(records)]
     ecg_summary = [r.ecg_summary for r in reversed(records)]
+    labels = [r.label for r in reversed(records)]
 
     return templates.TemplateResponse("dashboard_doctor.html", {
         "request": request,
@@ -357,6 +360,7 @@ def dashboard_doctor(request: Request, device_id: str = None):
         "respiration_rate": respiration_rate,
         "glucose_level": glucose_level,
         "ecg_summary": ecg_summary,
+        "labels": labels,
         "device_ids": device_ids,
         "selected_device": selected_device
     })

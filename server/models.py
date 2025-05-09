@@ -17,6 +17,7 @@ class SensorRecord(Base):
     respiration_rate = Column(Integer)             # respirations/min
     glucose_level = Column(Float)              # mg/dL ou mmol/L
     ecg_summary = Column(String)
+    label = Column(Integer, default=0)                        # 0: normal, 1: anomalie
 
 class SystemStatus(Base):
     __tablename__ = "system_status"
