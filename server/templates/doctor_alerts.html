@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🔎 Alertes Médicales</title>
+</head>
+<body>
+    <h2>🚨 Alertes médicales détectées</h2>
+    <table border="1">
+        <tr>
+            <th>Capteur</th>
+            <th>Date</th>
+            <th>Fréquence cardiaque</th>
+            <th>SpO₂</th>
+            <th>ECG</th>
+            <th>Lien</th>
+        </tr>
+        {% for r in alerts %}
+        <tr>
+            <td>{{ r.device_id }}</td>
+            <td>{{ r.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            <td>{{ r.heart_rate }}</td>
+            <td>{{ r.spo2 }}</td>
+            <td>{{ r.ecg_summary }}</td>
+            <td><a href="/dashboard/doctor?device_id={{ r.device_id }}">Voir</a></td>
+        </tr>
+        {% endfor %}
+    </table>
+    <br>
+    <a href="/dashboard/doctor">🔙 Retour</a>
+</body>
+</html>

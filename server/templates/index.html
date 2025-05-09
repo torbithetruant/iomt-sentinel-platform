@@ -1,37 +1,54 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>🏠 Accueil – IoMT Dashboard</title>
+    <title>🏠 Accueil – IoMT Sentinel</title>
     <style>
-        body { font-family: sans-serif; margin: 40px; }
+        body { font-family: sans-serif; margin: 40px; background-color: #f9f9f9; color: #333; }
         h1 { color: #2c3e50; }
         ul { list-style: none; padding: 0; }
-        li { margin-bottom: 10px; }
-        a { text-decoration: none; color: #007bff; }
+        li { margin-bottom: 12px; }
+        a { text-decoration: none; color: #007bff; font-weight: 500; }
         a:hover { text-decoration: underline; }
+        .role-section { margin-bottom: 30px; }
+        .logout { margin-top: 40px; }
     </style>
 </head>
 <body>
     <h1>👋 Bienvenue, {{ username }}</h1>
-    <p>Voici ce que vous pouvez faire :</p>
-    <ul>
+    <p>Rôle(s) : {{ roles | join(', ') }}</p>
+
+    <div class="role-section">
         {% if "doctor" in roles %}
-        <li>🩺 <a href="/dashboard/doctor">Voir les alertes médicales</a></li>
-        <li>📋 <a href="/dashboard/doctor/list">Voir la liste brute des capteurs</a></li>
+        <h2>🩺 Tableau de bord médical</h2>
+        <ul>
+            <li><a href="/dashboard/doctor">🔎 État des patients</a></li>
+            <li><a href="/dashboard/doctor/list">📋 Données des capteurs</a></li>
+            <li><a href="/dashboard/doctor/alerts">⚠️ Alertes de santé</a></li>
+            <li><a href="/dashboard/metrics">📊 Statistiques et métriques</a></li>
+        </ul>
         {% endif %}
 
         {% if "it_admin" in roles %}
-        <li>🛠️ <a href="/dashboard/system">Superviser les systèmes</a></li>
-        <li>📄 <a href="/dashboard/system/list">Voir la liste brute des états système</a></li>
-        <li>📋 <a href="/dashboard/logs">Consulter les logs système</a></li>
-        <li>📈 <a href="/dashboard/metrics">Visualiser les métriques</a></li>
+        <h2>🛠️ Supervision système</h2>
+        <ul>
+            <li><a href="/dashboard/system">📡 État des capteurs</a></li>
+            <li><a href="/dashboard/system/list">📋 Données système </a></li>
+            <li><a href="/dashboard/system/alerts">⚠️ Alertes système</a></li>
+            <li><a href="/dashboard/logs">🧾 Logs & accès</a></li>
+            <li><a href="/dashboard/metrics">📈 Statistiques et métriques</a></li>
+        </ul>
         {% endif %}
 
         {% if "patient" in roles %}
-        <li>📡 <em>Votre capteur est actuellement actif.</em></li>
+        <h2>📡 État du capteur</h2>
+        <ul>
+            <li><em>Votre capteur transmet actuellement les données de santé.</em></li>
+        </ul>
         {% endif %}
-    </ul>
+    </div>
 
-    <p><a href="/logout">🚪 Se déconnecter</a></p>
+    <div class="logout">
+        <a href="/logout">🚪 Se déconnecter</a>
+    </div>
 </body>
 </html>

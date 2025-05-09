@@ -5,8 +5,16 @@
     <h2>📊 Statistiques Système</h2>
     <ul>
         <li>📟 Capteurs uniques actifs : <strong>{{ devices }}</strong></li>
-        <li>📈 Données santé collectées : <strong>{{ sensor_count }}</strong></li>
-        <li>🛠️ États système reçus : <strong>{{ sys_count }}</strong></li>
+
+        {% if "doctor" in roles %}
+            <li>📈 Données santé collectées : <strong>{{ sensor_count }}</strong></li>
+            <li>🩺 Alertes médicales reçues : <strong>{{ health_alerts }}</strong></li>
+        {% endif %}
+
+        {% if "it_admin" in roles %}
+            <li>🛠️ États système reçus : <strong>{{ sys_count }}</strong></li>
+            <li>🗂️ Alertes système reçues : <strong>{{ system_alerts }}</strong></li>
+        {% endif %}
     </ul>
 
     <br><p><a href="/">🏠 Accueil</a> | <a href="/logout">Déconnexion</a></p>

@@ -13,13 +13,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
 from keycloak_file_monitor import monitor_keycloak_log
-from jose import jwt
+from jose import jwt, JWTError
 from typing import Optional
 from log import logger
 import os
 import asyncio
 import requests
 import time
+import json
 
 KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqmQj8TD7iTz+d4OFfcEym0hgMc5Q6jxp524Y/FhFCYPGntoMc+ML9kTr6hcMQdh8qRXvqd24FG1Ecgh90MWIuUYxC7hrhLr+jI5uJGwlQgsnkTnTpXGvtlf2rhbS+w+US3sQ/h2K9UsifgaH5+WSAIY95lut3AslU5zrSZeDxsMtbya10ZqYom7902OiuO81wfszO07Kk4hXSPaavo9HNyjMiIi6u+qZeQEu7kWULoCbZHOibt/Rm8yv58Issk9QRdfbp9XV2mtLYwIpVHDNFOkHAtPPeLo+JW2qmwAFIIGCgprXtwwtRROKynFaMVnMiSfaAc5bluZsv3RbLpqcBQIDAQAB
@@ -51,20 +52,37 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         ip = request.client.host
         method = request.method
         user_agent = request.headers.get("user-agent", "-")
+        auth_header = request.headers.get("authorization")
         token = request.cookies.get("access_token")
 
         username = "-"
+        device_id = "-"
+
+        # Try header if not found in cookie
+        if not token and auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1]
+        # Decode JWT token
         if token:
             try:
-                payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": False})
+                payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
                 username = payload.get("preferred_username", "-")
+            except JWTError as e:
+                pass
+
+        # 📦 Extract device_id from body (for POST/PUT)
+        if method in ("POST", "PUT"):
+            try:
+                body = await request.body()
+                request._body = body  # Reinject for downstream use
+                json_data = json.loads(body)
+                device_id = json_data.get("device_id", "-")
             except:
                 pass
 
         response = await call_next(request)
         duration = round((time.time() - start_time) * 1000)
 
-        logger.info(f'{ip} - {username} "{method} {path}" {response.status_code} "{user_agent}" {duration}ms')
+        logger.info(f'{ip} - {username} {device_id} "{method} {path}" {response.status_code} "{user_agent}" {duration}ms')
         return response
 
 
@@ -298,11 +316,6 @@ async def schedule_system_requests():
 
     asyncio.create_task(loop_requests())
 
-# @app.on_event("startup")
-# async def start_background_tasks():
-    # asyncio.create_task(monitor_keycloak_log())
-    # asyncio.create_task(schedule_system_requests())  # ta boucle de requêtes système
-
 
 # DASHBOARD
 
@@ -390,6 +403,35 @@ def dashboard_doctor_list(request: Request):
         "records": records
     })
 
+@app.get("/dashboard/doctor/alerts", response_class=HTMLResponse)
+def doctor_alerts_dashboard(request: Request):
+    token = request.cookies.get("access_token")
+    if not token:
+        return RedirectResponse(url="/login")
+
+    try:
+        payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
+        roles = payload.get("realm_access", {}).get("roles", [])
+        if "doctor" not in roles:
+            raise Exception("Access denied")
+    except:
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "message": "Accès refusé au tableau d’alerte."
+        })
+
+    db = SessionLocal()
+    alerts = db.query(SensorRecord)\
+            .filter(SensorRecord.label == 1)\
+            .order_by(SensorRecord.timestamp.desc())\
+            .limit(50).all()
+    db.close()
+
+    return templates.TemplateResponse("doctor_alerts.html", {
+        "request": request,
+        "alerts": alerts
+    })
+
 @app.get("/dashboard/system", response_class=HTMLResponse)
 def dashboard_system(request: Request, device_id: str = None):
     token = request.cookies.get("access_token")
@@ -470,6 +512,41 @@ def dashboard_system_list(request: Request):
         "records": records
     })
 
+@app.get("/dashboard/system/alerts", response_class=HTMLResponse)
+def system_alerts_dashboard(request: Request):
+    token = request.cookies.get("access_token")
+    if not token:
+        return RedirectResponse(url="/login")
+
+    try:
+        payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
+        roles = payload.get("realm_access", {}).get("roles", [])
+        if "it_admin" not in roles:
+            raise Exception("Access denied")
+    except:
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "message": "Accès refusé au tableau d’alerte système."
+        })
+
+    db = SessionLocal()
+    alerts = db.query(SystemStatus)\
+               .filter(
+                   (SystemStatus.disk_free_percent < 10) |
+                   (SystemStatus.update_required == True) |
+                   (SystemStatus.checksum_valid == False) |
+                   (SystemStatus.status != 1)
+               )\
+               .order_by(SystemStatus.timestamp.desc())\
+               .limit(50).all()
+    db.close()
+
+    return templates.TemplateResponse("system_alerts.html", {
+        "request": request,
+        "alerts": alerts
+    })
+
+
 @app.get("/dashboard/logs", response_class=HTMLResponse)
 def view_logs(request: Request):
     token = request.cookies.get("access_token")
@@ -511,6 +588,8 @@ def health_check():
 active_devices = Gauge("active_iomt_devices", "Nombre de capteurs uniques ayant envoyé des données")
 records_total = Gauge("sensor_records_total", "Nombre total de mesures de capteurs")
 system_entries = Gauge("system_status_total", "Nombre total de rapports système")
+health_alerts_gauge = Gauge("health_alerts_total", "Nombre d'alertes santé")
+system_alerts_gauge = Gauge("system_alerts_total", "Nombre d'alertes système")
 
 @app.get("/metrics")
 def metrics():
@@ -527,6 +606,24 @@ def metrics():
         # Nombre total de statuts système
         total_system = db.query(SystemStatus).count()
         system_entries.set(total_system)
+
+        # Comptage alertes santé
+        health_alerts = db.query(SensorRecord)\
+            .filter(SensorRecord.label == 1)\
+            .order_by(SensorRecord.timestamp.desc()).count()
+        health_alerts_gauge.set(health_alerts)
+
+        # Comptage alertes système
+        system_alerts = db.query(SystemStatus)\
+            .filter(
+                (SystemStatus.disk_free_percent < 10) |
+                (SystemStatus.update_required == True) |
+                (SystemStatus.checksum_valid == False) |
+                (SystemStatus.status != 1)
+            )\
+            .order_by(SystemStatus.timestamp.desc())
+        system_alerts_gauge.set(system_alerts)
+
     finally:
         db.close()
 
@@ -541,7 +638,7 @@ def metrics_dashboard(request: Request):
     try:
         payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
         roles = payload.get("realm_access", {}).get("roles", [])
-        if "it_admin" not in roles:
+        if "it_admin" not in roles and "doctor" not in roles:
             raise Exception("Access denied")
     except:
         return templates.TemplateResponse("error.html", {
@@ -551,13 +648,37 @@ def metrics_dashboard(request: Request):
 
     db = SessionLocal()
     active = db.query(SensorRecord.device_id).distinct().count()
-    sensor_count = db.query(SensorRecord).count()
-    sys_count = db.query(SystemStatus).count()
+
+    sys_count = -1
+    sensor_count = -1
+    health_alerts = -1
+    system_alerts = -1
+
+    if "it_admin" in roles:
+        sys_count = db.query(SystemStatus).count()
+        system_alerts = db.query(SystemStatus)\
+        .filter(
+            (SystemStatus.disk_free_percent < 10) |
+            (SystemStatus.update_required == True) |
+            (SystemStatus.checksum_valid == False) |
+            (SystemStatus.status != 1)
+        )\
+        .order_by(SystemStatus.timestamp.desc()).count()
+    
+    if "doctor" in roles:
+        sensor_count = db.query(SensorRecord).count()
+        health_alerts = db.query(SensorRecord)\
+            .filter(SensorRecord.label == 1)\
+            .order_by(SensorRecord.timestamp.desc()).count()
+    
     db.close()
 
     return templates.TemplateResponse("metrics_dashboard.html", {
         "request": request,
         "devices": active,
+        "roles": roles,
         "sensor_count": sensor_count,
-        "sys_count": sys_count
+        "sys_count": sys_count,
+        "health_alerts": health_alerts,
+        "system_alerts": system_alerts
     })

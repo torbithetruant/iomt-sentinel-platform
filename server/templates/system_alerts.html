@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🛠️ Alertes Système</title>
+</head>
+<body>
+    <h2>⚠️ Anomalies Système Détectées</h2>
+    <table border="1">
+        <tr>
+            <th>Capteur</th>
+            <th>Heure</th>
+            <th>% Disque</th>
+            <th>MAJ Requise</th>
+            <th>Intégrité</th>
+            <th>Statut</th>
+            <th>Lien</th>
+        </tr>
+        {% for r in alerts %}
+        <tr>
+            <td>{{ r.device_id }}</td>
+            <td>{{ r.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            <td>{{ r.disk_free_percent }}%</td>
+            <td>{{ "✅" if not r.update_required else "❗" }}</td>
+            <td>{{ "✅" if r.checksum_valid else "❌" }}</td>
+            <td>
+                {% if r.status == 0 %}
+                    🔴 Erreur
+                {% elif r.status == 2 %}
+                    🟡 Inactif
+                {% else %}
+                    🟢 OK
+                {% endif %}
+            </td>
+            <td><a href="/dashboard/system?device_id={{ r.device_id }}">Voir</a></td>
+        </tr>
+        {% endfor %}
+    </table>
+    <br>
+    <a href="/dashboard/system">🔙 Retour</a>
+</body>
+</html>
