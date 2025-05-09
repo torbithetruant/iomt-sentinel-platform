@@ -69,6 +69,7 @@ def generate_sensor_data(device_id, anomaly=False, profile=None):
     if anomaly:
         anomaly_types = ["tachy", "hypoxie", "hyperBP", "hypoBP", "glycémie", "resp"]
         selected = random.sample(anomaly_types, k=random.randint(1, 2))
+        data["label"] = 1
 
         if "tachy" in selected:
             data["heart_rate"] = random.randint(110, 150)
@@ -95,8 +96,6 @@ def generate_sensor_data(device_id, anomaly=False, profile=None):
         # Faux positifs ECG
         if data["ecg_summary"] == "Normal sinus rhythm" and random.random() < 0.1:
             data["ecg_summary"] = "Anomalous pattern"
-        
-        data["label"] = 1
 
     return data
 
