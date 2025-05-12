@@ -23,6 +23,7 @@ class SystemStatus(Base):
     __tablename__ = "system_status"
     id = Column(Integer, primary_key=True)
     device_id = Column(String)
+    username = Column(String)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     sensor_type = Column(String)                  
     ip_address = Column(String)                   
@@ -41,6 +42,18 @@ class SystemRequest(Base):
     requested_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     fulfilled = Column(Boolean, default=False)
 
+class UserAccount(Base):
+    __tablename__ = "user_account"
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True)
+    email = Column(String, unique=True)
+    role = Column(String)
+
+class Device(Base):
+    __tablename__ = "device"
+    id = Column(Integer, primary_key=True)
+    device_id = Column(String, unique=True)
+    username = Column(String, unique=True)
 
 DATABASE_URL = "sqlite:///./data.db"
 engine = create_engine(DATABASE_URL)

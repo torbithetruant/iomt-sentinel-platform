@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends
 from auth import require_role, get_jwt_username
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
-from models import SessionLocal, SensorRecord, SystemStatus, SystemRequest
+from models import SessionLocal, SensorRecord, SystemStatus, SystemRequest, UserAccount, Device
 from fastapi import Request, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -21,6 +21,8 @@ import asyncio
 import requests
 import time
 import json
+from fastapi.exceptions import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqmQj8TD7iTz+d4OFfcEym0hgMc5Q6jxp524Y/FhFCYPGntoMc+ML9kTr6hcMQdh8qRXvqd24FG1Ecgh90MWIuUYxC7hrhLr+jI5uJGwlQgsnkTnTpXGvtlf2rhbS+w+US3sQ/h2K9UsifgaH5+WSAIY95lut3AslU5zrSZeDxsMtbya10ZqYom7902OiuO81wfszO07Kk4hXSPaavo9HNyjMiIi6u+qZeQEu7kWULoCbZHOibt/Rm8yv58Issk9QRdfbp9XV2mtLYwIpVHDNFOkHAtPPeLo+JW2qmwAFIIGCgprXtwwtRROKynFaMVnMiSfaAc5bluZsv3RbLpqcBQIDAQAB
@@ -49,7 +51,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
         start_time = time.time()
 
-        ip = request.client.host
+        ip = request.headers.get("X-Forwarded-For") or request.client.host
         method = request.method
         user_agent = request.headers.get("user-agent", "-")
         auth_header = request.headers.get("authorization")
@@ -67,22 +69,51 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
                 username = payload.get("preferred_username", "-")
             except JWTError as e:
+                logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" [Invalid Token] {user_agent}")
                 pass
 
         # 📦 Extract device_id from body (for POST/PUT)
-        if method in ("POST", "PUT"):
+        if method in ("POST", "PUT") and not path.startswith("/login"):
             try:
                 body = await request.body()
                 request._body = body  # Reinject for downstream use
                 json_data = json.loads(body)
                 device_id = json_data.get("device_id", "-")
+                alert = json_data.get("label", 0)
             except:
+                logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" [Invalid JSON] {user_agent}")
                 pass
 
         response = await call_next(request)
         duration = round((time.time() - start_time) * 1000)
 
-        logger.info(f'{ip} - {username} {device_id} "{method} {path}" {response.status_code} "{user_agent}" {duration}ms')
+        if path.startswith("/login") and method == "POST":
+            if response.status_code == 302:
+                logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Login Success] {user_agent}")
+            else:
+                logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Login Failed] {user_agent}")
+        elif path.startswith("/api/sensor") or path.startswith("/api/system-status"):
+            db = SessionLocal()
+            verif_user_device = db.query(Device.device_id, Device.username == username).filter(Device.device_id == device_id).first()
+            if verif_user_device:
+                if alert == 1:
+                    logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Normal Sending] [Alert] {user_agent}")
+                else:
+                    logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Normal Sending] [Safe] {user_agent}")
+            else:
+                if alert == 1:
+                    logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Alert] {user_agent}")
+                else:
+                    logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Safe] {user_agent}")
+            db.close()
+        elif path.startswith("/dashboard"):
+            if response.status_code == 200:
+                logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Dashboard Access] {user_agent}")
+            else:
+                logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Dashboard Access Failed] {user_agent}")
+        else :
+            logger.info(f'{ip} - {username} {device_id} "{method} {path}" {response.status_code} "{user_agent}" {duration}ms')
+        
         return response
 
 
@@ -111,6 +142,7 @@ class SensorData(BaseModel):
 
 class SystemStatusData(BaseModel):
     device_id: str
+    username: str
     timestamp: datetime = datetime.now(timezone.utc)
     sensor_type: str                   # Ex: cardio, température, etc.
     ip_address: str
@@ -121,6 +153,11 @@ class SystemStatusData(BaseModel):
     os_version: str
     update_required: bool
     disk_free_percent: float
+
+class UserAccountData(BaseModel):
+    username: str
+    email: str
+    role: str
 
 
 def get_known_devices():
@@ -133,7 +170,6 @@ def get_known_devices():
     all_devices = {d[0] for d in devices_from_sensors + devices_from_system}
     return list(all_devices)
 
-
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     token = request.cookies.get("access_token")
@@ -145,6 +181,7 @@ def index(request: Request):
         roles = payload.get("realm_access", {}).get("roles", [])
         username = payload.get("preferred_username", "Utilisateur")
     except:
+        logger.warning(f"[{request.client.host}], [{request.headers.get('user-agent')}], [GET], [/], [Invalid Token]")
         return RedirectResponse(url="/login")
 
     return templates.TemplateResponse("index.html", {
@@ -174,32 +211,46 @@ def receive_sensor_data(request: Request, data: SensorData, user=Depends(require
     db.add(record)
     db.commit()
     db.close()
-    logger.info(f"📡 Sensor data received from {data.device_id} by {user['preferred_username']}")
     return {"status": "ok"}
 
 
 @app.post("/api/system-status")
 @limiter.limit("10/minute")
 def post_system_status(request: Request, data: SystemStatusData, user=Depends(require_role("patient"))):
-
     db = SessionLocal()
-    entry = SystemStatus(
-        device_id=data.device_id,
-        timestamp=data.timestamp,
-        sensor_type=data.sensor_type,
-        ip_address=data.ip_address,
-        firmware_version=data.firmware_version,
-        status=data.status,
-        data_frequency_seconds=data.data_frequency_seconds,
-        checksum_valid=data.checksum_valid,
-        os_version=data.os_version,
-        update_required=data.update_required,
-        disk_free_percent=data.disk_free_percent
-    )
-    db.add(entry)
-    db.commit()
-    db.close()
-    logger.info(f"💻 System status posted from {data.device_id} by {user['preferred_username']} → update_required={data.update_required}")
+
+    try:
+        # Vérifier si le device existe déjà
+        existing_device = db.query(Device).filter(Device.username == data.username).first()
+        if not existing_device:
+            # Créer le device s'il n'existe pas
+            new_device = Device(device_id=data.device_id, username=data.username)
+            db.add(new_device)
+            db.flush()  # Pour que l'insertion soit visible immédiatement
+
+        # Créer l'entrée SystemStatus
+        entry = SystemStatus(
+            device_id=data.device_id,
+            username=data.username,
+            timestamp=data.timestamp,
+            sensor_type=data.sensor_type,
+            ip_address=data.ip_address,
+            firmware_version=data.firmware_version,
+            status=data.status,
+            data_frequency_seconds=data.data_frequency_seconds,
+            checksum_valid=data.checksum_valid,
+            os_version=data.os_version,
+            update_required=data.update_required,
+            disk_free_percent=data.disk_free_percent
+        )
+        db.add(entry)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Erreur d'intégrité (device ou statut invalide)")
+    finally:
+        db.close()
+
     return {"status": "ok"}
 
 @app.post("/api/system-request")
@@ -210,7 +261,6 @@ def request_system_check(request: Request, device_id: str, user=Depends(require_
     db.add(req)
     db.commit()
     db.close()
-    logger.info(f"🛠️ Requested system check for {device_id}")
     return {"status": f"Demande d’état système envoyée à {device_id}"}
 
 @app.get("/api/system-request")
@@ -223,10 +273,10 @@ def check_for_request(request: Request, device_id: str, user=Depends(require_rol
             .first()
     if req:
         db.close()
-        logger.debug(f"📥 {device_id} checked for system request: FOUND")
+        logger.debug(f"System request : [{device_id}], [GET], [/api/system-request], [FOUND]")
         return {"request": True}
     db.close()
-    logger.debug(f"📥 {device_id} checked for system request: NONE")
+    logger.debug(f"System request : [{device_id}], [GET], [/api/system-request], [NONE]")
     return {"request": False}
 
 @app.get("/login", response_class=HTMLResponse)
@@ -248,14 +298,12 @@ def login_and_redirect(request: Request, username: str = Form(...), password: st
     r = requests.post(KEYCLOAK_TOKEN_URL, data=data, headers=headers, verify="certs/cert.pem")
 
     if r.status_code != 200:
-        logger.warning(f"❌ Failed login for {username} from {request.client.host} ({request.headers.get('user-agent')})")
         return templates.TemplateResponse("error.html", {
             "request": request,
             "message": "Échec de connexion : identifiants invalides."
         })
 
     token = r.json()["access_token"]
-    logger.info(f"🔓 Successful login for {username} from {request.client.host} ({request.headers.get('user-agent')})")
 
     response = RedirectResponse(url="/redirect", status_code=302)
     # 🔐 Stocker le token dans un cookie sécurisé
@@ -269,8 +317,9 @@ def redirect_by_role(request: Request):
         return RedirectResponse(url="/login")
     try:
         payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
-        roles = payload.get("realm_access", {}).get("roles", [])
+        # roles = payload.get("realm_access", {}).get("roles", [])
     except:
+        logger.warning(f"[{request.client.host}], [{request.headers.get('user-agent')}], [GET], [/redirect], [Invalid Token]")
         return RedirectResponse(url="/login")
 
     return RedirectResponse(url="/")
@@ -303,7 +352,6 @@ async def schedule_system_requests():
             deleted_sys = old_status.delete()
             if deleted_sys:
                 logger.info(f"🧹 {deleted_sys} old system status entries deleted (>30d).")
-
 
             # 📡 2. Envoi de nouvelles requêtes
             for device_id in get_known_devices():

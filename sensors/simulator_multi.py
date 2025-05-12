@@ -99,11 +99,12 @@ def generate_sensor_data(device_id, anomaly=False, profile=None):
 
     return data
 
-def generate_system_data(device_id, anomaly=False):
+def generate_system_data(device_id, ip, username, anomaly=False):
     data = {
         "device_id": device_id,
+        "username": username,
         "sensor_type": random.choice(["cardio", "thermique", "multi"]),
-        "ip_address": random_ip(),
+        "ip_address": ip,
         "firmware_version": f"v{random.randint(1,3)}.{random.randint(0,9)}.{random.randint(0,9)}",
         "status": 1,  # Actif par défaut
         "data_frequency_seconds": random.randint(10, 30),
@@ -135,6 +136,7 @@ def generate_system_data(device_id, anomaly=False):
 
 def simulate_capteur(capteur):
     profile = random.choice(PATIENT_PROFILES)
+    ip = random_ip()
 
     token = get_token(capteur["username"])
     if not token:
@@ -142,13 +144,14 @@ def simulate_capteur(capteur):
 
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-Forwarded-For": ip
     }
 
     while True:
         anomaly = random.random() < 0.2  # 20% anomalie
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly, profile)
-        system_data = generate_system_data(capteur["device_id"], anomaly)
+        system_data = generate_system_data(capteur["device_id"], ip, capteur["username"], anomaly)
 
         try:
             r1 = requests.post(API_SENSOR_URL, json=sensor_data, headers=headers, verify=CERT_PATH, timeout=5)
