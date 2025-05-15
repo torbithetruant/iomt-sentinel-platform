@@ -3,7 +3,7 @@ from time import sleep
 from itertools import product
 
 URL = "https://localhost:8000/login"
-USERNAME = "doctor_user"
+USERNAME = "it_admin001"
 CERT = "../server/certs/cert.pem"
 
 # Dictionnaire étendu simulé

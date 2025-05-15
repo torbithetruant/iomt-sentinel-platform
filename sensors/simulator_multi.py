@@ -11,7 +11,7 @@ API_SENSOR_URL = "https://localhost:8000/api/sensor"
 API_SYSTEM_URL = "https://localhost:8000/api/system-status"
 CERT_PATH = "../server/certs/cert.pem"
 CLIENT_ID = "iot_backend"
-CLIENT_SECRET = "VGNth5jUVhXhCx9qmgarzKPwcdhtwsF6"
+CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 # === SIMULATION PARAMS ===
 CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 101)]
@@ -149,7 +149,7 @@ def simulate_capteur(capteur):
     }
 
     while True:
-        anomaly = random.random() < 0.2  # 20% anomalie
+        anomaly = random.random() < 0.001  # 1% anomalie
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly, profile)
         system_data = generate_system_data(capteur["device_id"], ip, capteur["username"], anomaly)
 
@@ -159,7 +159,7 @@ def simulate_capteur(capteur):
 
             print(f"[{capteur['device_id']}] SENSOR → {r1.status_code} | SYSTEM → {r2.status_code}")
 
-            if r1.status_code in [401, 403] or r2.status_code in [401, 403]:
+            if r1.status_code in [401, 403, 500] or r2.status_code in [401, 403, 500]:
                 print(f"🔁 Refreshing token for {capteur['device_id']}")
                 token = get_token(capteur["username"])
                 if token:

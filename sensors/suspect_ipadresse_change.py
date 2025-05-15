@@ -6,10 +6,10 @@ from datetime import datetime
 API_URL = "https://localhost:8000/api/sensor"
 SYSTEM_URL = "https://localhost:8000/api/system-status"
 CERT_PATH = "../server/certs/cert.pem"
-USERNAME = "patient_001"
+USERNAME = "patient_024"
 PASSWORD = "test123"
 CLIENT_ID = "iot_backend"
-CLIENT_SECRET = "VGNth5jUVhXhCx9qmgarzKPwcdhtwsF6"
+CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 
@@ -34,7 +34,7 @@ def generate_fake_ip():
 
 def generate_malicious_data():
     return {
-        "device_id": "raspi_001",
+        "device_id": "raspi_024",
         "timestamp": datetime.now().isoformat(),
         "heart_rate": random.randint(140, 200),
         "spo2": round(random.uniform(85.0, 94.0), 1),
@@ -49,7 +49,7 @@ def generate_malicious_data():
 
 def generate_system_data():
     return {
-        "device_id": "raspi_001",
+        "device_id": "raspi_024",
         "username": USERNAME,
         "timestamp": datetime.now().isoformat(),
         "sensor_type": "health_monitor",
@@ -83,6 +83,7 @@ def simulate():
             r = requests.post(API_URL, json=data, headers=headers, verify=CERT_PATH, timeout=5)
             r2 = requests.post(SYSTEM_URL, json=system_data, headers=headers, verify=CERT_PATH, timeout=5)
             print(f"[{fake_ip}] Sent malicious data → {r.status_code}")
+            print(f"[{fake_ip}] Sent system data → {r2.status_code}")
         except Exception as e:
             print("❌ Error sending data:", e)
 
