@@ -24,9 +24,7 @@ import json
 from fastapi.exceptions import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqmQj8TD7iTz+d4OFfcEym0hgMc5Q6jxp524Y/FhFCYPGntoMc+ML9kTr6hcMQdh8qRXvqd24FG1Ecgh90MWIuUYxC7hrhLr+jI5uJGwlQgsnkTnTpXGvtlf2rhbS+w+US3sQ/h2K9UsifgaH5+WSAIY95lut3AslU5zrSZeDxsMtbya10ZqYom7902OiuO81wfszO07Kk4hXSPaavo9HNyjMiIi6u+qZeQEu7kWULoCbZHOibt/Rm8yv58Issk9QRdfbp9XV2mtLYwIpVHDNFOkHAtPPeLo+JW2qmwAFIIGCgprXtwwtRROKynFaMVnMiSfaAc5bluZsv3RbLpqcBQIDAQAB
------END PUBLIC KEY-----
+KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA69YwDPnk80OzGdp2doWI+2S0XYrmF4kkekFounifw+2h6lTNqEsGSwT8NCaAI3N/rcHxTQb17QAL3xrRdXdQiBGJmJypsl3wn+ryZCElG9i3mnRsr5R6GgNiqkf4jDDaA5leQ1wQPOl12hJTjj58X3g9ZmPVbV7PH16pCOYwhRJgs2mnCm0UajtNr4Kwzq5KhLlItE1oeQ6DvXfTEL7aEeLqW+Mx1BuQ3NPn9l9nXHs6ii3PLKyXBxcTsIEdCVKiADDRBxSsRxSPwKxgS6AflTSDwN+/Up7wS//UUqEb03xm0xiWuIF6T3tloyssx71JXijHOPG/q2KdhnqNBcy7TQIDAQAB-----END PUBLIC KEY-----
 """
 
 ALGORITHM = "RS256"
@@ -36,7 +34,7 @@ post = ["patient", "doctor"]
 
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 CLIENT_ID = "iot_backend"
-CLIENT_SECRET = "VGNth5jUVhXhCx9qmgarzKPwcdhtwsF6"
+CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 LOG_PATH = "logs/server.log"
 
@@ -104,7 +102,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 if alert == 1:
                     logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Alert] {user_agent}")
                 else:
-                    logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Safe] {user_agent}")
+                    logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Safe] {user_agent}")
             db.close()
         elif path.startswith("/dashboard"):
             if response.status_code == 200:

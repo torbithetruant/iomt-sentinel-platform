@@ -6,5 +6,6 @@ requests
 pydantic
 prometheus_client
 starlette
-nginx
 slowapi
+jinja2
+python-multipart

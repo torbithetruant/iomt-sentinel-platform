@@ -2,12 +2,11 @@ from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from slowapi.util import get_remote_address
 from jose import jwt, JWTError
+from datetime import datetime
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqmQj8TD7iTz+d4OFfcEym0hgMc5Q6jxp524Y/FhFCYPGntoMc+ML9kTr6hcMQdh8qRXvqd24FG1Ecgh90MWIuUYxC7hrhLr+jI5uJGwlQgsnkTnTpXGvtlf2rhbS+w+US3sQ/h2K9UsifgaH5+WSAIY95lut3AslU5zrSZeDxsMtbya10ZqYom7902OiuO81wfszO07Kk4hXSPaavo9HNyjMiIi6u+qZeQEu7kWULoCbZHOibt/Rm8yv58Issk9QRdfbp9XV2mtLYwIpVHDNFOkHAtPPeLo+JW2qmwAFIIGCgprXtwwtRROKynFaMVnMiSfaAc5bluZsv3RbLpqcBQIDAQAB
------END PUBLIC KEY-----
+KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA69YwDPnk80OzGdp2doWI+2S0XYrmF4kkekFounifw+2h6lTNqEsGSwT8NCaAI3N/rcHxTQb17QAL3xrRdXdQiBGJmJypsl3wn+ryZCElG9i3mnRsr5R6GgNiqkf4jDDaA5leQ1wQPOl12hJTjj58X3g9ZmPVbV7PH16pCOYwhRJgs2mnCm0UajtNr4Kwzq5KhLlItE1oeQ6DvXfTEL7aEeLqW+Mx1BuQ3NPn9l9nXHs6ii3PLKyXBxcTsIEdCVKiADDRBxSsRxSPwKxgS6AflTSDwN+/Up7wS//UUqEb03xm0xiWuIF6T3tloyssx71JXijHOPG/q2KdhnqNBcy7TQIDAQAB-----END PUBLIC KEY-----
 """
 
 ALGORITHM = "RS256"
@@ -22,7 +21,7 @@ def get_jwt_username(request):
         return get_remote_address(request)  # fallback IP
     try:
         token = auth.split(" ")[1]
-        payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=["RS256"], options={"verify_aud": False})
+        payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False})
         return payload.get("preferred_username", "anonymous")
     except Exception:
         return "unauthenticated"
@@ -33,6 +32,8 @@ def require_role(*allowed_roles):
         roles = payload.get("realm_access", {}).get("roles", [])
         if not any(role in roles for role in allowed_roles):
             raise HTTPException(status_code=403, detail="Access denied")
+        if payload.get("exp") < datetime.now().timestamp():
+            raise HTTPException(status_code=403, detail="Token expired")
         return payload
     return wrapper
 
