@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# 🛑 Stopper le conteneur
+# Stop the Keycloak container
 echo "⏹️  Arrêt du conteneur Keycloak..."
 docker stop keycloak
 
-# 🧹 Supprimer le conteneur (mais pas le volume de données)
+# Delete the Keycloak container but keep the volume
 echo "🧽 Suppression du conteneur Keycloak..."
 docker rm keycloak
 
-echo "✅ Conteneur Keycloak arrêté et supprimé. Le volume 'keycloak_data' est conservé."
+echo "Keycloak docker has been stopped and removed. You can restart it with the start script."

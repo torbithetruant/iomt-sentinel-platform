@@ -92,8 +92,8 @@ def generate_dataset(num_blocks=1000, anomaly_ratio=0.1, output_csv="iomt_logs_d
         all_data.append({"context": context, "label": 1})
 
     df = pd.DataFrame(all_data)
-    df.to_csv(output_csv, index=False, quoting=1)  # quoting=1 => csv.QUOTE_ALL
+    df.to_csv(output_csv, index=False, quoting=1)
     print(f"✅ Fichier généré : {output_csv} ({len(df)} blocs — {anomaly_blocks} anomalies)")
 
-# Exemple d’utilisation
+
 generate_dataset(num_blocks=10000, anomaly_ratio=0.2)

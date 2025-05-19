@@ -14,11 +14,12 @@ ISSUER = "http://localhost:8080/realms/iot_realm"
 
 ALLOWED_ROLES = ["patient", "doctor", "it_admin"]
 
-# Fonction de clé personnalisée pour récupérer l’utilisateur depuis le JWT
+# Function to get the username from the JWT token
+# This function is used to extract the username from the JWT token in the request headers.
 def get_jwt_username(request):
     auth = request.headers.get("Authorization")
     if not auth:
-        return get_remote_address(request)  # fallback IP
+        return get_remote_address(request)
     try:
         token = auth.split(" ")[1]
         payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False})
@@ -26,6 +27,7 @@ def get_jwt_username(request):
     except Exception:
         return "unauthenticated"
 
+# Middleware to verify the JWT token and roles
 def require_role(*allowed_roles):
     def wrapper(token: str = Depends(oauth2_scheme)):
         payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
@@ -37,6 +39,7 @@ def require_role(*allowed_roles):
         return payload
     return wrapper
 
+# Old function to verify the JWT token and roles (not used in the new code)
 def verify_token(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(
@@ -50,7 +53,7 @@ def verify_token(token: str = Depends(oauth2_scheme)):
         resource_roles = payload.get("resource_access", {}).get("iot_backend", {}).get("roles", [])
         roles = list(set(realm_roles + resource_roles))
 
-        print("✅ JWT roles:", roles)
+        print("JWT roles:", roles)
 
         if not any(role in roles for role in ALLOWED_ROLES):
             raise HTTPException(status_code=403, detail="User role not allowed")
@@ -58,7 +61,7 @@ def verify_token(token: str = Depends(oauth2_scheme)):
         return payload
 
     except JWTError as e:
-        print("❌ JWT Error:", str(e))
+        print("JWT Error:", str(e))
         raise HTTPException(status_code=403, detail="Token verification failed")
 
 

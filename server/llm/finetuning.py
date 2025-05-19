@@ -1,3 +1,8 @@
+#####################################################################################################################
+# Exemple Fine-tuning de TinyBERT pour la détection d'attaques sur des logs
+# J'utilise Google Colab pour le fine-tuning, mais tu peux le faire sur ta machine locale si tu as un GPU performant.
+#####################################################################################################################
+
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
 from datasets import Dataset
@@ -9,7 +14,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
-# 🔹 1. Chargement des données (exemple simplifié)
+# 🔹 1. Chargement des données
 # Le CSV doit avoir deux colonnes : 'text' (log) et 'label' (0 normal, 1 attaque)
 df = pd.read_csv("logs/processed_logs.csv")  # remplace par ton chemin
 
@@ -49,7 +54,7 @@ def compute_metrics(eval_pred):
 # 🔹 7. Entraînement
 training_args = TrainingArguments(
     output_dir="./tinybert-logs",
-    eva_strategy="epoch",
+    eval_strategy="epoch",
     save_strategy="epoch",
     learning_rate=2e-5,
     per_device_train_batch_size=32,
