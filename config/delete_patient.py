@@ -6,7 +6,7 @@ ADMIN_USER = "admin"
 ADMIN_PASS = "admin"
 CLIENT_ID = "admin-cli"
 
-# 🔐 Authentification admin
+# Authentification admin
 def get_admin_token():
     url = f"{KEYCLOAK_URL}/realms/master/protocol/openid-connect/token"
     data = {
@@ -20,12 +20,13 @@ def get_admin_token():
     r.raise_for_status()
     return r.json()["access_token"]
 
-# 🧽 Supprimer tous les users "patient_xxx"
+# Delete patient users
 def delete_patient_users(token):
     headers = {"Authorization": f"Bearer {token}"}
     base_url = f"{KEYCLOAK_URL}/admin/realms/{REALM}/users"
 
-    # Récupère tous les utilisateurs (optionnellement, paginer si beaucoup d'utilisateurs)
+    # Take all users
+    # Note: The max limit is 1000, but we can use pagination to get all users
     r = requests.get(f"{base_url}?max=2000", headers=headers)
     r.raise_for_status()
     users = r.json()
@@ -41,9 +42,9 @@ def delete_patient_users(token):
                 print(f"🗑️  Supprimé : {username}")
                 deleted += 1
             else:
-                print(f"❌ Erreur suppression {username}: {resp.status_code} {resp.text}")
+                print(f"Error deletion {username}: {resp.status_code} {resp.text}")
 
-    print(f"\n✅ {deleted} utilisateurs 'patient_' supprimés.")
+    print(f"\n✅ {deleted} users 'patient_' deleted.")
 
 # === MAIN ===
 if __name__ == "__main__":

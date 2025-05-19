@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends
 from auth import require_role, get_jwt_username
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
-from models import SessionLocal, SensorRecord, SystemStatus, SystemRequest, UserAccount, Device
+from models import SessionLocal, SensorRecord, SystemStatus, SystemRequest, Device
 from fastapi import Request, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
-from keycloak_file_monitor import monitor_keycloak_log
+# from keycloak_file_monitor import monitor_keycloak_log
 from jose import jwt, JWTError
 from typing import Optional
 from log import logger
@@ -24,6 +24,7 @@ import json
 from fastapi.exceptions import HTTPException
 from sqlalchemy.exc import IntegrityError
 
+# Change with your Keycloak public key
 KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA69YwDPnk80OzGdp2doWI+2S0XYrmF4kkekFounifw+2h6lTNqEsGSwT8NCaAI3N/rcHxTQb17QAL3xrRdXdQiBGJmJypsl3wn+ryZCElG9i3mnRsr5R6GgNiqkf4jDDaA5leQ1wQPOl12hJTjj58X3g9ZmPVbV7PH16pCOYwhRJgs2mnCm0UajtNr4Kwzq5KhLlItE1oeQ6DvXfTEL7aEeLqW+Mx1BuQ3NPn9l9nXHs6ii3PLKyXBxcTsIEdCVKiADDRBxSsRxSPwKxgS6AflTSDwN+/Up7wS//UUqEb03xm0xiWuIF6T3tloyssx71JXijHOPG/q2KdhnqNBcy7TQIDAQAB-----END PUBLIC KEY-----
 """
 
@@ -34,6 +35,8 @@ post = ["patient", "doctor"]
 
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 CLIENT_ID = "iot_backend"
+
+# Change with your Keycloak client secret
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 LOG_PATH = "logs/server.log"
@@ -43,7 +46,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: StarletteRequest, call_next):
         path = request.url.path
-        # Exclure les chemins préfixés
+        # Exclude certain paths from logging
         if any(path.startswith(excl) for excl in self.EXCLUDED_PATHS):
             return await call_next(request)
 
@@ -70,7 +73,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" [Invalid Token] {user_agent}")
                 pass
 
-        # 📦 Extract device_id from body (for POST/PUT)
+        # Extract device_id from body (for POST/PUT)
         if method in ("POST", "PUT") and not path.startswith("/login"):
             try:
                 body = await request.body()
@@ -85,6 +88,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         duration = round((time.time() - start_time) * 1000)
 
+        # Log the request depending on the action and status code
         if path.startswith("/login") and method == "POST":
             if response.status_code == 302:
                 logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Login Success] {user_agent}")
@@ -115,7 +119,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Utiliser cette fonction comme clé
+# Use of slowapi for rate limiting per user
 limiter = Limiter(key_func=get_jwt_username)
 
 app = FastAPI()
@@ -124,7 +128,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(AccessLogMiddleware)
 templates = Jinja2Templates(directory="templates")
 
-# Modèle pour les données capteurs
+# Model for sensor data
 class SensorData(BaseModel):
     device_id: str
     timestamp: datetime = datetime.now(timezone.utc)
@@ -138,6 +142,7 @@ class SensorData(BaseModel):
     ecg_summary: Optional[str] = None
     label: Optional[int] = None                        # 0: normal, 1: anomalie
 
+# Model for system status data
 class SystemStatusData(BaseModel):
     device_id: str
     username: str
@@ -152,22 +157,24 @@ class SystemStatusData(BaseModel):
     update_required: bool
     disk_free_percent: float
 
+# Model for User account data
 class UserAccountData(BaseModel):
     username: str
     email: str
     role: str
 
-
+# Return the list of known devices
 def get_known_devices():
     db = SessionLocal()
     devices_from_sensors = db.query(SensorRecord.device_id).distinct().all()
     devices_from_system = db.query(SystemStatus.device_id).distinct().all()
     db.close()
 
-    # Fusionner les deux sources et supprimer les doublons
+    # Combine the two lists and remove duplicates
     all_devices = {d[0] for d in devices_from_sensors + devices_from_system}
     return list(all_devices)
 
+# Index page
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     token = request.cookies.get("access_token")
@@ -188,6 +195,7 @@ def index(request: Request):
         "username": username
     })
 
+# Receive sensor data
 @app.post("/api/sensor")
 @limiter.limit("10/minute")
 def receive_sensor_data(request: Request, data: SensorData, user=Depends(require_role("patient"))):
@@ -211,22 +219,22 @@ def receive_sensor_data(request: Request, data: SensorData, user=Depends(require
     db.close()
     return {"status": "ok"}
 
-
+# Receive system status data
 @app.post("/api/system-status")
 @limiter.limit("10/minute")
 def post_system_status(request: Request, data: SystemStatusData, user=Depends(require_role("patient"))):
     db = SessionLocal()
 
     try:
-        # Vérifier si le device existe déjà
+        # Verify if the device already exists
         existing_device = db.query(Device).filter(Device.username == data.username).first()
         if not existing_device:
-            # Créer le device s'il n'existe pas
+            # Create a new device if it doesn't exist
             new_device = Device(device_id=data.device_id, username=data.username)
             db.add(new_device)
-            db.flush()  # Pour que l'insertion soit visible immédiatement
+            db.flush()  # Prepare the new device for the next query
 
-        # Créer l'entrée SystemStatus
+        # Create a new system status entry
         entry = SystemStatus(
             device_id=data.device_id,
             username=data.username,
@@ -245,12 +253,13 @@ def post_system_status(request: Request, data: SystemStatusData, user=Depends(re
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Erreur d'intégrité (device ou statut invalide)")
+        raise HTTPException(status_code=400, detail="Error inserting data. Device ID or username may already exist.")
     finally:
         db.close()
 
     return {"status": "ok"}
 
+# Receive system request for status system of device
 @app.post("/api/system-request")
 @limiter.limit("10/minute")
 def request_system_check(request: Request, device_id: str, user=Depends(require_role("it_admin"))):
@@ -261,6 +270,7 @@ def request_system_check(request: Request, device_id: str, user=Depends(require_
     db.close()
     return {"status": f"Demande d’état système envoyée à {device_id}"}
 
+# Check if there is a system request for the device
 @app.get("/api/system-request")
 @limiter.limit("10/minute")
 def check_for_request(request: Request, device_id: str, user=Depends(require_role("patient"))):
@@ -277,10 +287,12 @@ def check_for_request(request: Request, device_id: str, user=Depends(require_rol
     logger.debug(f"System request : [{device_id}], [GET], [/api/system-request], [NONE]")
     return {"request": False}
 
+# Login page
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
+# Connect to Keycloak and redirect to the dashboard
 @app.post("/login")
 @limiter.limit("5/minute")
 def login_and_redirect(request: Request, username: str = Form(...), password: str = Form(...)):
@@ -298,16 +310,17 @@ def login_and_redirect(request: Request, username: str = Form(...), password: st
     if r.status_code != 200:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Échec de connexion : identifiants invalides."
+            "message": "Failed to authenticate. Please check your credentials."
         })
 
     token = r.json()["access_token"]
 
     response = RedirectResponse(url="/redirect", status_code=302)
-    # 🔐 Stocker le token dans un cookie sécurisé
-    response.set_cookie(key="access_token", value=token, httponly=True, secure=True)  # ⚠️ mettre `secure=True` en prod
+    # Store the token in a secure cookie
+    response.set_cookie(key="access_token", value=token, httponly=True, secure=True)
     return response
 
+# Middleware to check the token and redirect if necessary
 @app.get("/redirect")
 def redirect_by_role(request: Request):
     token = request.cookies.get("access_token")
@@ -315,13 +328,13 @@ def redirect_by_role(request: Request):
         return RedirectResponse(url="/login")
     try:
         payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
-        # roles = payload.get("realm_access", {}).get("roles", [])
     except:
         logger.warning(f"[{request.client.host}], [{request.headers.get('user-agent')}], [GET], [/redirect], [Invalid Token]")
         return RedirectResponse(url="/login")
 
     return RedirectResponse(url="/")
 
+# Logout and delete the token
 @app.get("/logout")
 def logout():
     response = RedirectResponse(url="/login")
@@ -329,7 +342,7 @@ def logout():
     return response
 
 
-# Script lancement du serveur
+# Launch the system requests every minute and clean up old requests
 @app.on_event("startup")
 async def schedule_system_requests():
     async def loop_requests():
@@ -337,21 +350,21 @@ async def schedule_system_requests():
             db = SessionLocal()
             now = datetime.now(timezone.utc)
 
-            # 🔁 1. Nettoyage des requêtes anciennes
+            # Cleaning up fulfilled system requests older than 10 minutes
             cutoff = now - timedelta(minutes=10)
             old_reqs = db.query(SystemRequest).filter(SystemRequest.fulfilled == True, SystemRequest.requested_at < cutoff)
             deleted = old_reqs.delete()
             if deleted:
                 logger.info(f"🧹 {deleted} fulfilled system requests cleaned up.")
 
-            # Nettoyer les états système vieux de 30 jours
+            # Cleaning up old system requests older than 30 days
             cutoff_sys = now - timedelta(days=30)
             old_status = db.query(SystemStatus).filter(SystemStatus.timestamp < cutoff_sys)
             deleted_sys = old_status.delete()
             if deleted_sys:
                 logger.info(f"🧹 {deleted_sys} old system status entries deleted (>30d).")
 
-            # 📡 2. Envoi de nouvelles requêtes
+            # Sending system check requests to all known devices
             for device_id in get_known_devices():
                 logger.debug(f"📡 System check request sent to {device_id}")
                 db.add(SystemRequest(device_id=device_id))
@@ -365,6 +378,7 @@ async def schedule_system_requests():
 
 # DASHBOARD
 
+# Doctor dashboard
 @app.get("/dashboard/doctor", response_class=HTMLResponse)
 def dashboard_doctor(request: Request, device_id: str = None):
     token = request.cookies.get("access_token")
@@ -384,14 +398,14 @@ def dashboard_doctor(request: Request, device_id: str = None):
 
     db = SessionLocal()
 
-    # Liste des capteurs uniques
+    # Get all devices from the database
     all_devices = db.query(SensorRecord.device_id).distinct().all()
     device_ids = [d[0] for d in all_devices]
 
-    # Si aucun capteur sélectionné, en prendre un par défaut
+    # If device_id is not provided, select the first one
     selected_device = device_id or device_ids[0] if device_ids else None
 
-    # Données filtrées
+    # Fetch the last 50 records for the selected device
     records = db.query(SensorRecord).filter_by(device_id=selected_device)\
              .order_by(SensorRecord.timestamp.desc()).limit(50).all()
 
@@ -424,6 +438,7 @@ def dashboard_doctor(request: Request, device_id: str = None):
         "selected_device": selected_device
     })
 
+# Doctor dashboard list
 @app.get("/dashboard/doctor/list", response_class=HTMLResponse)
 def dashboard_doctor_list(request: Request):
     token = request.cookies.get("access_token")
@@ -437,7 +452,7 @@ def dashboard_doctor_list(request: Request):
     except:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Accès refusé aux données patient."
+            "message": "Access denied to the list of patients."
         })
 
     db = SessionLocal()
@@ -449,6 +464,7 @@ def dashboard_doctor_list(request: Request):
         "records": records
     })
 
+# Doctor dashboard alerts
 @app.get("/dashboard/doctor/alerts", response_class=HTMLResponse)
 def doctor_alerts_dashboard(request: Request):
     token = request.cookies.get("access_token")
@@ -463,7 +479,7 @@ def doctor_alerts_dashboard(request: Request):
     except:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Accès refusé au tableau d’alerte."
+            "message": "Access denied to the alerts."
         })
 
     db = SessionLocal()
@@ -478,6 +494,7 @@ def doctor_alerts_dashboard(request: Request):
         "alerts": alerts
     })
 
+# IT Admin dashboard
 @app.get("/dashboard/system", response_class=HTMLResponse)
 def dashboard_system(request: Request, device_id: str = None):
     token = request.cookies.get("access_token")
@@ -492,7 +509,7 @@ def dashboard_system(request: Request, device_id: str = None):
     except:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Accès refusé à la supervision système."
+            "message": "Access denied to the system dashboard."
         })
 
     db = SessionLocal()
@@ -533,6 +550,7 @@ def dashboard_system(request: Request, device_id: str = None):
         "selected_device": selected_device
     })
 
+# IT Admin dashboard list
 @app.get("/dashboard/system/list", response_class=HTMLResponse)
 def dashboard_system_list(request: Request):
     token = request.cookies.get("access_token")
@@ -546,7 +564,7 @@ def dashboard_system_list(request: Request):
     except:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Accès refusé aux données système."
+            "message": "Access denied to the list of system status."
         })
 
     db = SessionLocal()
@@ -558,6 +576,7 @@ def dashboard_system_list(request: Request):
         "records": records
     })
 
+# IT Admin dashboard alerts
 @app.get("/dashboard/system/alerts", response_class=HTMLResponse)
 def system_alerts_dashboard(request: Request):
     token = request.cookies.get("access_token")
@@ -572,7 +591,7 @@ def system_alerts_dashboard(request: Request):
     except:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Accès refusé au tableau d’alerte système."
+            "message": "Access denied to the system alerts."
         })
 
     db = SessionLocal()
@@ -592,7 +611,7 @@ def system_alerts_dashboard(request: Request):
         "alerts": alerts
     })
 
-
+# IT Admin dashboard logs
 @app.get("/dashboard/logs", response_class=HTMLResponse)
 def view_logs(request: Request):
     token = request.cookies.get("access_token")
@@ -607,17 +626,17 @@ def view_logs(request: Request):
     except:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Vous n'avez pas les droits requis pour voir les logs."
+            "message": "Access denied to the logs."
         })
 
     if not os.path.exists(LOG_PATH):
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Le fichier de log n'existe pas encore."
+            "message": "Log file not found."
         })
 
     with open(LOG_PATH, "r") as f:
-        log_content = f.read()[-5000:]  # dernière portion pour éviter surcharge
+        log_content = f.read()[-5000:]  # Read the last 5000 characters of the log file
 
     return templates.TemplateResponse("logs.html", {
         "request": request,
@@ -626,40 +645,42 @@ def view_logs(request: Request):
 
 # Monitoring
 
+# Health check endpoint
 @app.get("/health", response_class=PlainTextResponse)
 def health_check():
     return "OK"
 
-# 📊 Prometheus metrics
+# Prometheus metrics
 active_devices = Gauge("active_iomt_devices", "Nombre de capteurs uniques ayant envoyé des données")
 records_total = Gauge("sensor_records_total", "Nombre total de mesures de capteurs")
 system_entries = Gauge("system_status_total", "Nombre total de rapports système")
 health_alerts_gauge = Gauge("health_alerts_total", "Nombre d'alertes santé")
 system_alerts_gauge = Gauge("system_alerts_total", "Nombre d'alertes système")
 
+# Prometheus metrics endpoint
 @app.get("/metrics")
 def metrics():
     db = SessionLocal()
     try:
-        # Nombre de capteurs uniques (présence dans la base)
+        # Number of unique devices
         active = db.query(SensorRecord.device_id).distinct().count()
         active_devices.set(active)
 
-        # Nombre total de données reçues
+        # Number of total sensor records
         total_sensor = db.query(SensorRecord).count()
         records_total.set(total_sensor)
 
-        # Nombre total de statuts système
+        # Number of system status entries
         total_system = db.query(SystemStatus).count()
         system_entries.set(total_system)
 
-        # Comptage alertes santé
+        # Number of health alerts
         health_alerts = db.query(SensorRecord)\
             .filter(SensorRecord.label == 1)\
             .order_by(SensorRecord.timestamp.desc()).count()
         health_alerts_gauge.set(health_alerts)
 
-        # Comptage alertes système
+        # Number of system alerts
         system_alerts = db.query(SystemStatus)\
             .filter(
                 (SystemStatus.disk_free_percent < 10) |
@@ -675,6 +696,7 @@ def metrics():
 
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
+# Metrics dashboard
 @app.get("/dashboard/metrics", response_class=HTMLResponse)
 def metrics_dashboard(request: Request):
     token = request.cookies.get("access_token")
@@ -689,7 +711,7 @@ def metrics_dashboard(request: Request):
     except:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "Accès refusé aux métriques."
+            "message": "Access denied to the metrics dashboard."
         })
 
     db = SessionLocal()

@@ -11,7 +11,7 @@ CLIENT_ID = "admin-cli"
 FIRST_NAMES = ["Liam", "Emma", "Noah", "Olivia", "Ava", "Ethan", "Sophia", "Lucas", "Mia", "Amelia", "Leo", "Julia"]
 LAST_NAMES = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Andrews", "Miller", "Martin", "Lee"]
 
-# Step 1: Get admin token
+# Get admin token
 def get_admin_token():
     url = f"{KEYCLOAK_URL}/realms/master/protocol/openid-connect/token"
     data = {
@@ -36,7 +36,7 @@ def get_user_id(username, headers):
         time.sleep(1)
     return None
 
-# Step 2: Get patient role
+# Get patient role
 def get_patient_role(token):
     url = f"{KEYCLOAK_URL}/admin/realms/{REALM}/roles/patient"
     headers = {"Authorization": f"Bearer {token}"}
@@ -44,7 +44,7 @@ def get_patient_role(token):
     r.raise_for_status()
     return r.json()
 
-# Step 3: Create users
+# Create users
 def create_users(token, role_obj):
     headers = {
         "Authorization": f"Bearer {token}",
@@ -74,26 +74,26 @@ def create_users(token, role_obj):
         # Create user
         r = requests.post(f"{KEYCLOAK_URL}/admin/realms/{REALM}/users", json=user_data, headers=headers)
         if r.status_code == 201:
-            print(f"✅ Created {username} ({email}) - {first_name} {last_name}")
+            print(f"Created {username} ({email}) - {first_name} {last_name}")
         elif r.status_code == 409:
-            print(f"⚠️  {username} already exists")
+            print(f"{username} already exists")
         else:
-            print(f"❌ Error creating {username}: {r.status_code} {r.text}")
+            print(f"Error creating {username}: {r.status_code} {r.text}")
             continue
 
         # Get user ID
         user_id = get_user_id(username, headers)
         if not user_id:
-            print(f"❌ Failed to retrieve ID for {username}")
+            print(f"Failed to retrieve ID for {username}")
             continue
 
         # Assign patient role
         role_url = f"{KEYCLOAK_URL}/admin/realms/{REALM}/users/{user_id}/role-mappings/realm"
         r = requests.post(role_url, json=[role_obj], headers=headers)
         if r.status_code == 204:
-            print(f"🔐 Role assigned to {username}")
+            print(f"Role assigned to {username}")
         else:
-            print(f"❌ Error assigning role to {username}: {r.status_code} {r.text}")
+            print(f"Error assigning role to {username}: {r.status_code} {r.text}")
 
 # === RUN ===
 if __name__ == "__main__":

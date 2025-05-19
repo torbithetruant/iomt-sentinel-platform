@@ -4,6 +4,12 @@ from datetime import datetime, timezone
 
 Base = declarative_base()
 
+# Define the database models
+# These models represent the structure of the database tables
+# and are used to interact with the database using SQLAlchemy ORM.
+# The models are defined using SQLAlchemy's declarative base
+
+
 class SensorRecord(Base):
     __tablename__ = "sensor_data"
     id = Column(Integer, primary_key=True)
@@ -12,12 +18,12 @@ class SensorRecord(Base):
     heart_rate = Column(Integer)
     spo2 = Column(Float)
     temperature = Column(Float)
-    systolic_bp = Column(Integer)                 # mmHg
-    diastolic_bp = Column(Integer)                # mmHg
-    respiration_rate = Column(Integer)             # respirations/min
-    glucose_level = Column(Float)              # mg/dL ou mmol/L
+    systolic_bp = Column(Integer)                 
+    diastolic_bp = Column(Integer)                
+    respiration_rate = Column(Integer)             
+    glucose_level = Column(Float)              
     ecg_summary = Column(String)
-    label = Column(Integer, default=0)                        # 0: normal, 1: anomalie
+    label = Column(Integer, default=0)                      
 
 class SystemStatus(Base):
     __tablename__ = "system_status"

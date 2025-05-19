@@ -52,6 +52,8 @@ Configurer les éléments suivants :
 - Utilisateur de test : patient_user / test123
 - Client Secret : à copier dans sensors/simulator_multi.py
 
+Lancer le fichier sync_users_from_keycloak.py pour avoir les utilisateurs dans la base de données locales.
+
 ---
 
 ## 5. 📦 Installer les dépendances Python
@@ -113,18 +115,6 @@ uvicorn server.main:app --host 0.0.0.0 --port 8000 \
 Remplacer CLIENT_SECRET dans sensors/simulator_multi.py avec celui généré dans Keycloak.
 
 python sensors/simulator_multi.py
-
----
-
-## 9. 🧠 Entraîner les modèles de ML
-
-python server/ml/train_models.py
-
----
-
-## 10. 🧹 Nettoyage Keycloak (optionnel)
-
-python config/delete_all_keycloak.py
 
 ---
 

@@ -1,5 +1,6 @@
 import re
 
+# This function takes a list of log entries and builds a context string for each entry.
 def build_context_from_logs(log_group):
     context = []
     last_ip_per_user = {}
@@ -59,6 +60,9 @@ def build_context_from_logs(log_group):
 
     return " ".join(context)
 
+# This function takes a log file path and reads the last 'block_size' lines from it.
+# It parses each line to extract relevant information and returns a list of dictionaries.
+# Each dictionary contains the parsed information from a log entry.
 def parse_last_logs_from_raw_file(log_path, block_size=10):
     with open(log_path, "r") as f:
         lines = f.readlines()[-block_size:]
