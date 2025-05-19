@@ -5,7 +5,7 @@
 - **FastAPI** pour le backend
 - **Keycloak** pour la gestion des identités et rôles
 - **NGINX** pour le proxy HTTPS + sécurité
-- **Machine Learning** (Random Forest, Isolation Forest) pour la détection d’anomalies
+- **LLM** (DistilBERT) pour la détection d’anomalies (sur les logs serveurs + logs IAM)
 - **Dashboards dynamiques** avec Jinja2 + Chart.js
 - **Prometheus** pour exporter des métriques de supervision
 
@@ -15,11 +15,10 @@
 
 - Authentification JWT avec rôles (`patient`, `doctor`, `it_admin`)
 - Envoi de données santé et système par 100 capteurs simulés
-- Détection automatique d’anomalies (modèles ML supervisés)
+- Détection automatique d’anomalies (modèles LLM finetuné)
 - Tableaux de bord filtrés selon le rôle
 - Export Prometheus (`/metrics`) et dashboard `metrics`
 - Logs applicatifs complets (accès, anomalies, erreurs, connexions)
-- Surveillance système par NGINX avec health-check
 
 ---
 
@@ -33,13 +32,11 @@
 
 ---
 
-## 🧠 Modèles de Machine Learning
+## 🧠 Modèles de LLM
 
-Deux modèles sont entraînés automatiquement :
-
-- **RandomForestClassifier** : données capteurs santé et données système (disque, MAJ, checksum)
-
-Les scores d’anomalie sont exportables, et un futur LLM pourra superviser ou ajuster les décisions.
+J'utilise distilBERT déjà finetuné sur des logs que j'ai contextualisé, le but est de :
+- faire de la détection d'anomalie en temps réel (prendre les logs 10 par 10 les contextualiser et les classifier) => en cours
+- passer la classification à un LLM qui génére du texte pour mieux comprendre la classification des logs => pas encore dispo
 
 ---
 
@@ -61,15 +58,6 @@ Les scores d’anomalie sont exportables, et un futur LLM pourra superviser ou a
 | `doctor`   | `/dashboard/doctor`         | Signes vitaux des patients               |
 | `it_admin` | `/dashboard/system`         | État système des capteurs                |
 | `it_admin` | `/dashboard/metrics`        | Prometheus : nombre de devices, etc.     |
-
----
-
-## 🛠️ Contribuer
-
-- Ajouter un LLM superviseur via `/ml/supervisor.py`
-- Intégrer Grafana pour la visualisation
-- Ajouter une base NoSQL pour scaler
-- Étendre les types de capteurs
 
 ---
 
