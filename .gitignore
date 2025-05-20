@@ -4,8 +4,12 @@ server/certs/
 # Cache Python
 server/__pycache__/
 
+server/database/__pycache__/
+
 # Fichiers sensibles ou scripts locaux
 config/logs/
+
+logs/
 
 # Fichiers de lancement
 server/launcher.sh
