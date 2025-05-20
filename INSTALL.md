@@ -1,4 +1,4 @@
-# 🛠️ Installation locale – IoMT Sentinel
+# Installation locale – IoMT Sentinel
 
 ## 1. Pré-requis
 
@@ -11,7 +11,7 @@
 
 ---
 
-## 2. 📜 Génération de certificats locaux
+## 2. Génération de certificats locaux
 
 Place un fichier cert.cnf dans server/certs/, puis exécute :
 
@@ -95,7 +95,7 @@ sudo systemctl restart nginx
 
 ---
 
-## Créer la base de données
+## 7. Créer la base de données
 
 sudo -u postgres psql
 CREATE USER "username" WITH PASSWORD "password";
@@ -106,7 +106,7 @@ DATABASE_URL = "postgresql+asyncpg://username:password@localhost:5432/iomt_db"
 
 python create_db_async.py
 
-## 7. Lancer le serveur FastAPI
+## 8. Lancer le serveur FastAPI
 
 uvicorn server.main:app --host 0.0.0.0 --port 8000 \
   --ssl-keyfile=server/certs/key.pem \
@@ -116,7 +116,7 @@ uvicorn server.main:app --host 0.0.0.0 --port 8000 \
 
 ---
 
-## 8. Lancer les capteurs simulés
+## 9. Lancer les capteurs simulés
 
 Remplacer CLIENT_SECRET dans sensors/simulator_multi.py avec celui généré dans Keycloak.
 
