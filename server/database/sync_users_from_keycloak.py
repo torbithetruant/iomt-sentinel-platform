@@ -1,5 +1,7 @@
 import requests
-from models import SessionLocal, UserAccount
+import asyncio
+from database.models import AsyncSessionLocal, UserAccount
+from sqlalchemy import delete
 
 # === CONFIGURATION ===
 KEYCLOAK_URL = "http://localhost:8080"
@@ -49,7 +51,7 @@ def get_all_users(token):
 
     return all_users
 
-# === 3. Récupérer les rôles d'un utilisateur ===
+# === Get roles for a user ===
 def get_user_roles(token, user_id):
     url = f"{KEYCLOAK_URL}/admin/realms/{REALM}/users/{user_id}/role-mappings/realm"
     headers = {"Authorization": f"Bearer {token}"}
@@ -60,35 +62,34 @@ def get_user_roles(token, user_id):
         print(f"Impossible to get roles for user_id={user_id}: {response.text}")
         return []
 
-# === PRINCIPAL ===
-if __name__ == "__main__":
-    
-    db = SessionLocal()
-    db.query(UserAccount).delete()
-
-    # Authentication
+# === Sync users to async DB ===
+async def sync_users():
     token = get_admin_token()
-    print("Token admin")
+    print("✔️ Admin token acquired")
 
-    # Get all users
     users = get_all_users(token)
-    print(f"🔍 {len(users)} users find in the realm '{REALM}'")
+    print(f"🔍 {len(users)} users found in realm '{REALM}'")
 
-    for user in users:
-        user_id = user["id"]
-        username = user["username"]
-        email = user.get("email", None)
+    async with AsyncSessionLocal() as session:
+        await session.execute(delete(UserAccount))
 
-        roles = get_user_roles(token, user_id)
-        for role in roles:
-            if role["name"] not in VALID_ROLES:
-                print(f"Role not valid for {username}: {role['name']}")
-                continue
-            role_name = role["name"]
-            db_user = UserAccount(username=username, email=email, role=role_name)
-            db.add(db_user)
-            print(f"👤 {username} → role : {role_name}")
+        for user in users:
+            user_id = user["id"]
+            username = user["username"]
+            email = user.get("email", None)
 
-    db.commit()
-    db.close()
-    print("All users synced with the database.")
+            roles = get_user_roles(token, user_id)
+            for role in roles:
+                if role["name"] not in VALID_ROLES:
+                    print(f"⚠️  Invalid role for {username}: {role['name']}")
+                    continue
+                role_name = role["name"]
+                db_user = UserAccount(username=username, email=email, role=role_name)
+                session.add(db_user)
+                print(f"👤 {username} → role : {role_name}")
+
+        await session.commit()
+    print("✅ All users synced with the async PostgreSQL database.")
+
+if __name__ == "__main__":
+    asyncio.run(sync_users())

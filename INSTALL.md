@@ -6,7 +6,8 @@
 - pip  
 - Docker (pour Keycloak)  
 - OpenSSL  
-- NGINX (pour HTTPS et proxy)  
+- NGINX (pour HTTPS et proxy)
+- PostgreSQL
 
 ---
 
@@ -20,21 +21,15 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 
 ---
 
-## 3. 🔐 Lancer Keycloak
+## 3. Lancer Keycloak
 
-docker run -p 8080:8080 \
-  -v keycloak_data:/opt/keycloak/data \
-  -e KEYCLOAK_ADMIN=admin \
-  -e KEYCLOAK_ADMIN_PASSWORD=admin \
-  --name keycloak quay.io/keycloak/keycloak:24.0.1 start-dev
-
-Ou avec le script fourni :
+Avec le script fourni :
 
 ./config/keycloak.sh
 
 ---
 
-## 4. ⚙️ Configurer Keycloak
+## 4. Configurer Keycloak
 
 Accéder à http://localhost:8080
 
@@ -56,7 +51,7 @@ Lancer le fichier sync_users_from_keycloak.py pour avoir les utilisateurs dans l
 
 ---
 
-## 5. 📦 Installer les dépendances Python
+## 5. Installer les dépendances Python
 
 python3 -m venv venv
 source venv/bin/activate
@@ -64,7 +59,7 @@ pip install -r requirements.txt
 
 ---
 
-## 6. 🔧 Configuration NGINX
+## 6. Configuration NGINX
 
 Créer un fichier /etc/nginx/sites-available/iomt.conf :
 
@@ -100,17 +95,28 @@ sudo systemctl restart nginx
 
 ---
 
-## 7. 🚀 Lancer le serveur FastAPI
+## Créer la base de données
+
+sudo -u postgres psql
+CREATE USER "username" WITH PASSWORD "password";
+CREATE DATABASE iot_db OWNER "username";
+
+N'oubliez pas de préciser le "username" et "password" dans database/models.py :
+DATABASE_URL = "postgresql+asyncpg://username:password@localhost:5432/iomt_db"
+
+python create_db_async.py
+
+## 7. Lancer le serveur FastAPI
 
 uvicorn server.main:app --host 0.0.0.0 --port 8000 \
   --ssl-keyfile=server/certs/key.pem \
   --ssl-certfile=server/certs/cert.pem
 
-👉 Accès : https://localhost:8000
+--> Accès : https://localhost:8000
 
 ---
 
-## 8. 🛰️ Lancer les capteurs simulés
+## 8. Lancer les capteurs simulés
 
 Remplacer CLIENT_SECRET dans sensors/simulator_multi.py avec celui généré dans Keycloak.
 
@@ -118,7 +124,7 @@ python sensors/simulator_multi.py
 
 ---
 
-## ✅ Accès
+## Accès
 
 - **Interface web** : [https://localhost:8000/](https://localhost:8000/)
 - **Documentation API** : [https://localhost:8000/docs](https://localhost:8000/docs)

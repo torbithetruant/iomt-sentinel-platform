@@ -1,0 +1,10 @@
+{
+  "username": "patient_001",
+  "device_id": "raspi_001",
+  "keycloak_url": "http://<keycloak-ip>:8080/realms/iot_realm/protocol/openid-connect/token",
+  "api_sensor_url": "https://<api-server>:8000/api/sensor",
+  "api_system_url": "https://<api-server>:8000/api/system-status",
+  "cert_path": "/opt/iomt_agent/cert.pem",
+  "client_id": "iot_backend",
+  "client_secret": "votre_secret_client"
+}
