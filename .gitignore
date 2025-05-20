@@ -6,14 +6,12 @@ server/__pycache__/
 
 # Fichiers sensibles ou scripts locaux
 config/logs/
-*.log
 
 # Fichiers de lancement
 server/launcher.sh
 
 # Logs
-server/logs/
-*.log
+server/logs/*.log
 
 # Database
 server/data.db

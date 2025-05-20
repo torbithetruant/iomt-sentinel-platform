@@ -1,28 +1,55 @@
-from fastapi import FastAPI, Depends
-from auth import require_role, get_jwt_username
-from pydantic import BaseModel
-from datetime import datetime, timezone, timedelta
-from models import SessionLocal, SensorRecord, SystemStatus, SystemRequest, Device
-from fastapi import Request, Form
-from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, PlainTextResponse
-from fastapi.responses import RedirectResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request as StarletteRequest
-from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
-# from keycloak_file_monitor import monitor_keycloak_log
-from jose import jwt, JWTError
-from typing import Optional
-from log import logger
+# === Standard Library ===
 import os
-import asyncio
-import requests
 import time
 import json
+import asyncio
+import requests
+import httpx
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+# === Third-Party Libraries ===
+
+## FastAPI & Starlette
+from fastapi import FastAPI, Depends, Request, Form
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import HTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+
+## Pydantic
+from pydantic import BaseModel
+
+## SQLAlchemy (Async)
+from sqlalchemy import select, delete, func
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+## Authentication & Security
+from jose import jwt, JWTError
+
+## Rate Limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+## Prometheus Monitoring
+from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
+
+# === Internal Modules ===
+
+## Auth
+from auth import require_role, get_jwt_username
+
+## Database Models
+from database.models import AsyncSessionLocal, SensorRecord, SystemStatus, SystemRequest, Device
+
+## Logging
+from logs.scripts.log import logger
+
+# Optional future import (commented out)
+# from keycloak_file_monitor import monitor_keycloak_log
+
 
 # Change with your Keycloak public key
 KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA69YwDPnk80OzGdp2doWI+2S0XYrmF4kkekFounifw+2h6lTNqEsGSwT8NCaAI3N/rcHxTQb17QAL3xrRdXdQiBGJmJypsl3wn+ryZCElG9i3mnRsr5R6GgNiqkf4jDDaA5leQ1wQPOl12hJTjj58X3g9ZmPVbV7PH16pCOYwhRJgs2mnCm0UajtNr4Kwzq5KhLlItE1oeQ6DvXfTEL7aEeLqW+Mx1BuQ3NPn9l9nXHs6ii3PLKyXBxcTsIEdCVKiADDRBxSsRxSPwKxgS6AflTSDwN+/Up7wS//UUqEb03xm0xiWuIF6T3tloyssx71JXijHOPG/q2KdhnqNBcy7TQIDAQAB-----END PUBLIC KEY-----
@@ -46,12 +73,10 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: StarletteRequest, call_next):
         path = request.url.path
-        # Exclude certain paths from logging
         if any(path.startswith(excl) for excl in self.EXCLUDED_PATHS):
             return await call_next(request)
 
         start_time = time.time()
-
         ip = request.headers.get("X-Forwarded-For") or request.client.host
         method = request.method
         user_agent = request.headers.get("user-agent", "-")
@@ -60,63 +85,62 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
         username = "-"
         device_id = "-"
+        alert = 0
 
-        # Try header if not found in cookie
         if not token and auth_header and auth_header.lower().startswith("bearer "):
             token = auth_header.split(" ", 1)[1]
-        # Decode JWT token
+
         if token:
             try:
                 payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
                 username = payload.get("preferred_username", "-")
-            except JWTError as e:
+            except JWTError:
                 logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" [Invalid Token] {user_agent}")
-                pass
 
-        # Extract device_id from body (for POST/PUT)
         if method in ("POST", "PUT") and not path.startswith("/login"):
             try:
                 body = await request.body()
-                request._body = body  # Reinject for downstream use
+                request._body = body
                 json_data = json.loads(body)
                 device_id = json_data.get("device_id", "-")
                 alert = json_data.get("label", 0)
             except:
                 logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" [Invalid JSON] {user_agent}")
-                pass
 
         response = await call_next(request)
         duration = round((time.time() - start_time) * 1000)
 
-        # Log the request depending on the action and status code
         if path.startswith("/login") and method == "POST":
             if response.status_code == 302:
                 logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Login Success] {user_agent}")
             else:
                 logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Login Failed] {user_agent}")
         elif path.startswith("/api/sensor") or path.startswith("/api/system-status"):
-            db = SessionLocal()
-            verif_user_device = db.query(Device.device_id, Device.username == username).filter(Device.device_id == device_id).first()
-            if verif_user_device:
-                if alert == 1:
-                    logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Normal Sending] [Alert] {user_agent}")
+            async with AsyncSessionLocal() as session:
+                stmt = select(Device).filter(Device.device_id == device_id, Device.username == username)
+                result = await session.execute(stmt)
+                device_match = result.scalar_one_or_none()
+
+                if device_match:
+                    if alert == 1:
+                        logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Normal Sending] [Alert] {user_agent}")
+                    else:
+                        logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Normal Sending] [Safe] {user_agent}")
                 else:
-                    logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Normal Sending] [Safe] {user_agent}")
-            else:
-                if alert == 1:
-                    logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Alert] {user_agent}")
-                else:
-                    logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Safe] {user_agent}")
-            db.close()
+                    if alert == 1:
+                        logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Alert] {user_agent}")
+                    else:
+                        logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Safe] {user_agent}")
         elif path.startswith("/dashboard"):
             if response.status_code == 200:
                 logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Dashboard Access] {user_agent}")
             else:
                 logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Dashboard Access Failed] {user_agent}")
-        else :
+        else:
             logger.info(f'{ip} - {username} {device_id} "{method} {path}" {response.status_code} "{user_agent}" {duration}ms')
-        
+
         return response
+
 
 
 # Use of slowapi for rate limiting per user
@@ -163,15 +187,18 @@ class UserAccountData(BaseModel):
     email: str
     role: str
 
-# Return the list of known devices
-def get_known_devices():
-    db = SessionLocal()
-    devices_from_sensors = db.query(SensorRecord.device_id).distinct().all()
-    devices_from_system = db.query(SystemStatus.device_id).distinct().all()
-    db.close()
+async def get_db() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        yield session
 
-    # Combine the two lists and remove duplicates
-    all_devices = {d[0] for d in devices_from_sensors + devices_from_system}
+# Return the list of known devices
+async def get_known_devices(db: AsyncSession):
+    sensor_result = await db.execute(select(SensorRecord.device_id).distinct())
+    system_result = await db.execute(select(SystemStatus.device_id).distinct())
+
+    devices_from_sensors = [row[0] for row in sensor_result.all()]
+    devices_from_system = [row[0] for row in system_result.all()]
+    all_devices = set(devices_from_sensors + devices_from_system)
     return list(all_devices)
 
 # Index page
@@ -198,9 +225,8 @@ def index(request: Request):
 # Receive sensor data
 @app.post("/api/sensor")
 @limiter.limit("10/minute")
-def receive_sensor_data(request: Request, data: SensorData, user=Depends(require_role("patient"))):
+async def receive_sensor_data(request: Request, data: SensorData, user=Depends(require_role("patient")), db: AsyncSession = Depends(get_db)):
 
-    db = SessionLocal()
     record = SensorRecord(
         device_id=data.device_id,
         timestamp=data.timestamp,
@@ -215,26 +241,37 @@ def receive_sensor_data(request: Request, data: SensorData, user=Depends(require
         label=data.label
     )
     db.add(record)
-    db.commit()
-    db.close()
+    try:
+        db.add(record)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+
     return {"status": "ok"}
 
 # Receive system status data
 @app.post("/api/system-status")
 @limiter.limit("10/minute")
-def post_system_status(request: Request, data: SystemStatusData, user=Depends(require_role("patient"))):
-    db = SessionLocal()
-
+async def post_system_status(
+    request: Request,
+    data: SystemStatusData,
+    user=Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db)
+):
     try:
-        # Verify if the device already exists
-        existing_device = db.query(Device).filter(Device.username == data.username).first()
+        # Vérifie si le device existe déjà (requête async)
+        result = await db.execute(
+            select(Device).where(Device.username == data.username)
+        )
+        existing_device = result.scalar_one_or_none()
+
         if not existing_device:
-            # Create a new device if it doesn't exist
             new_device = Device(device_id=data.device_id, username=data.username)
             db.add(new_device)
-            db.flush()  # Prepare the new device for the next query
+            await db.flush()  # Nécessaire si la FK est utilisée juste après
 
-        # Create a new system status entry
+        # Crée une entrée SystemStatus
         entry = SystemStatus(
             device_id=data.device_id,
             username=data.username,
@@ -250,40 +287,51 @@ def post_system_status(request: Request, data: SystemStatusData, user=Depends(re
             disk_free_percent=data.disk_free_percent
         )
         db.add(entry)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Error inserting data. Device ID or username may already exist.")
-    finally:
-        db.close()
+        await db.commit()
 
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Error inserting data. Device ID or username may already exist.")
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Unexpected error")
+    
     return {"status": "ok"}
 
 # Receive system request for status system of device
 @app.post("/api/system-request")
 @limiter.limit("10/minute")
-def request_system_check(request: Request, device_id: str, user=Depends(require_role("it_admin"))):
-    db = SessionLocal()
+async def request_system_check(
+    request: Request,
+    device_id: str,
+    user=Depends(require_role("it_admin")),
+    db: AsyncSession = Depends(get_db)
+):
     req = SystemRequest(device_id=device_id)
     db.add(req)
-    db.commit()
-    db.close()
+    await db.commit()
     return {"status": f"Demande d’état système envoyée à {device_id}"}
 
 # Check if there is a system request for the device
 @app.get("/api/system-request")
 @limiter.limit("10/minute")
-def check_for_request(request: Request, device_id: str, user=Depends(require_role("patient"))):
-    db = SessionLocal()
-    req = db.query(SystemRequest)\
-            .filter_by(device_id=device_id, fulfilled=False)\
-            .order_by(SystemRequest.requested_at.desc())\
-            .first()
+async def check_for_request(
+    request: Request,
+    device_id: str,
+    user=Depends(require_role("patient")),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(SystemRequest)
+        .where(SystemRequest.device_id == device_id, SystemRequest.fulfilled == False)
+        .order_by(SystemRequest.requested_at.desc())
+    )
+    req = result.scalars().first()
+
     if req:
-        db.close()
         logger.debug(f"System request : [{device_id}], [GET], [/api/system-request], [FOUND]")
         return {"request": True}
-    db.close()
+
     logger.debug(f"System request : [{device_id}], [GET], [/api/system-request], [NONE]")
     return {"request": False}
 
@@ -295,8 +343,7 @@ def login_form(request: Request):
 # Connect to Keycloak and redirect to the dashboard
 @app.post("/login")
 @limiter.limit("5/minute")
-def login_and_redirect(request: Request, username: str = Form(...), password: str = Form(...)):
-    # 1. Obtenir le JWT depuis Keycloak
+async def login_and_redirect(request: Request, username: str = Form(...), password: str = Form(...)):
     data = {
         "grant_type": "password",
         "client_id": CLIENT_ID,
@@ -305,7 +352,9 @@ def login_and_redirect(request: Request, username: str = Form(...), password: st
         "password": password
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    r = requests.post(KEYCLOAK_TOKEN_URL, data=data, headers=headers, verify="certs/cert.pem")
+
+    async with httpx.AsyncClient(verify="certs/cert.pem") as client:
+        r = await client.post(KEYCLOAK_TOKEN_URL, data=data, headers=headers)
 
     if r.status_code != 200:
         return templates.TemplateResponse("error.html", {
@@ -314,9 +363,7 @@ def login_and_redirect(request: Request, username: str = Form(...), password: st
         })
 
     token = r.json()["access_token"]
-
     response = RedirectResponse(url="/redirect", status_code=302)
-    # Store the token in a secure cookie
     response.set_cookie(key="access_token", value=token, httponly=True, secure=True)
     return response
 
@@ -347,29 +394,32 @@ def logout():
 async def schedule_system_requests():
     async def loop_requests():
         while True:
-            db = SessionLocal()
-            now = datetime.now(timezone.utc)
+            async with AsyncSessionLocal() as db:
+                now = datetime.now(timezone.utc)
 
-            # Cleaning up fulfilled system requests older than 10 minutes
-            cutoff = now - timedelta(minutes=10)
-            old_reqs = db.query(SystemRequest).filter(SystemRequest.fulfilled == True, SystemRequest.requested_at < cutoff)
-            deleted = old_reqs.delete()
-            if deleted:
-                logger.info(f"🧹 {deleted} fulfilled system requests cleaned up.")
+                # Delete fulfilled system requests older than 10 minutes
+                cutoff = now - timedelta(minutes=10)
+                stmt1 = delete(SystemRequest).where(
+                    SystemRequest.fulfilled == True,
+                    SystemRequest.requested_at < cutoff
+                )
+                result1 = await db.execute(stmt1)
+                if result1.rowcount > 0:
+                    logger.info(f"🧹 {result1.rowcount} fulfilled system requests cleaned up.")
 
-            # Cleaning up old system requests older than 30 days
-            cutoff_sys = now - timedelta(days=30)
-            old_status = db.query(SystemStatus).filter(SystemStatus.timestamp < cutoff_sys)
-            deleted_sys = old_status.delete()
-            if deleted_sys:
-                logger.info(f"🧹 {deleted_sys} old system status entries deleted (>30d).")
+                # Delete system status older than 30 days
+                cutoff_sys = now - timedelta(days=30)
+                stmt2 = delete(SystemStatus).where(SystemStatus.timestamp < cutoff_sys)
+                result2 = await db.execute(stmt2)
+                if result2.rowcount > 0:
+                    logger.info(f"🧹 {result2.rowcount} old system status entries deleted (>30d).")
 
-            # Sending system check requests to all known devices
-            for device_id in get_known_devices():
-                logger.debug(f"📡 System check request sent to {device_id}")
-                db.add(SystemRequest(device_id=device_id))
-            db.commit()
-            db.close()
+                # Add a system request for each known device
+                for device_id in await get_known_devices(db):
+                    logger.debug(f"📡 System check request sent to {device_id}")
+                    db.add(SystemRequest(device_id=device_id))
+
+                await db.commit()
 
             await asyncio.sleep(60)
 
@@ -380,7 +430,7 @@ async def schedule_system_requests():
 
 # Doctor dashboard
 @app.get("/dashboard/doctor", response_class=HTMLResponse)
-def dashboard_doctor(request: Request, device_id: str = None):
+async def dashboard_doctor(request: Request, device_id: str = None, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("access_token")
     if not token:
         return RedirectResponse("/login")
@@ -391,56 +441,38 @@ def dashboard_doctor(request: Request, device_id: str = None):
         if "doctor" not in roles:
             raise Exception("Access denied")
     except:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "Vous n'avez pas les droits requis."
-        })
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Vous n'avez pas les droits requis."})
 
-    db = SessionLocal()
+    result = await db.execute(select(SensorRecord.device_id).distinct())
+    device_ids = [row[0] for row in result.all()]
+    selected_device = device_id or (device_ids[0] if device_ids else None)
 
-    # Get all devices from the database
-    all_devices = db.query(SensorRecord.device_id).distinct().all()
-    device_ids = [d[0] for d in all_devices]
-
-    # If device_id is not provided, select the first one
-    selected_device = device_id or device_ids[0] if device_ids else None
-
-    # Fetch the last 50 records for the selected device
-    records = db.query(SensorRecord).filter_by(device_id=selected_device)\
-             .order_by(SensorRecord.timestamp.desc()).limit(50).all()
-
-    db.close()
+    result = await db.execute(
+        select(SensorRecord).where(SensorRecord.device_id == selected_device)
+        .order_by(SensorRecord.timestamp.desc()).limit(50)
+    )
+    records = result.scalars().all()
 
     timestamps = [r.timestamp.strftime("%H:%M:%S") for r in reversed(records)]
-    heart_rates = [r.heart_rate for r in reversed(records)]
-    spo2_values = [r.spo2 for r in reversed(records)]
-    temp_values = [r.temperature for r in reversed(records)]
-    systolic_bp = [r.systolic_bp for r in reversed(records)]
-    diastolic_bp = [r.diastolic_bp for r in reversed(records)]
-    respiration_rate = [r.respiration_rate for r in reversed(records)]
-    glucose_level = [r.glucose_level for r in reversed(records)]
-    ecg_summary = [r.ecg_summary for r in reversed(records)]
-    labels = [r.label for r in reversed(records)]
-
     return templates.TemplateResponse("dashboard_doctor.html", {
         "request": request,
         "timestamps": timestamps,
-        "heart_rates": heart_rates,
-        "spo2_values": spo2_values,
-        "temp_values": temp_values,
-        "systolic_bp": systolic_bp,
-        "diastolic_bp": diastolic_bp,
-        "respiration_rate": respiration_rate,
-        "glucose_level": glucose_level,
-        "ecg_summary": ecg_summary,
-        "labels": labels,
+        "heart_rates": [r.heart_rate for r in reversed(records)],
+        "spo2_values": [r.spo2 for r in reversed(records)],
+        "temp_values": [r.temperature for r in reversed(records)],
+        "systolic_bp": [r.systolic_bp for r in reversed(records)],
+        "diastolic_bp": [r.diastolic_bp for r in reversed(records)],
+        "respiration_rate": [r.respiration_rate for r in reversed(records)],
+        "glucose_level": [r.glucose_level for r in reversed(records)],
+        "ecg_summary": [r.ecg_summary for r in reversed(records)],
+        "labels": [r.label for r in reversed(records)],
         "device_ids": device_ids,
         "selected_device": selected_device
     })
 
 # Doctor dashboard list
 @app.get("/dashboard/doctor/list", response_class=HTMLResponse)
-def dashboard_doctor_list(request: Request):
+async def dashboard_doctor_list(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("access_token")
     if not token:
         return RedirectResponse("/login")
@@ -450,53 +482,35 @@ def dashboard_doctor_list(request: Request):
         if "doctor" not in payload.get("realm_access", {}).get("roles", []):
             raise Exception("Access denied")
     except:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "Access denied to the list of patients."
-        })
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Access denied to the list of patients."})
 
-    db = SessionLocal()
-    records = db.query(SensorRecord).order_by(SensorRecord.timestamp.desc()).limit(100).all()
-    db.close()
+    result = await db.execute(select(SensorRecord).order_by(SensorRecord.timestamp.desc()).limit(100))
+    records = result.scalars().all()
 
-    return templates.TemplateResponse("doctor_list.html", {
-        "request": request,
-        "records": records
-    })
+    return templates.TemplateResponse("doctor_list.html", {"request": request, "records": records})
 
 # Doctor dashboard alerts
 @app.get("/dashboard/doctor/alerts", response_class=HTMLResponse)
-def doctor_alerts_dashboard(request: Request):
+async def doctor_alerts_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("access_token")
     if not token:
-        return RedirectResponse(url="/login")
+        return RedirectResponse("/login")
 
     try:
         payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
-        roles = payload.get("realm_access", {}).get("roles", [])
-        if "doctor" not in roles:
+        if "doctor" not in payload.get("realm_access", {}).get("roles", []):
             raise Exception("Access denied")
     except:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "Access denied to the alerts."
-        })
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Access denied to the alerts."})
 
-    db = SessionLocal()
-    alerts = db.query(SensorRecord)\
-            .filter(SensorRecord.label == 1)\
-            .order_by(SensorRecord.timestamp.desc())\
-            .limit(50).all()
-    db.close()
+    result = await db.execute(select(SensorRecord).where(SensorRecord.label == 1).order_by(SensorRecord.timestamp.desc()).limit(50))
+    alerts = result.scalars().all()
 
-    return templates.TemplateResponse("doctor_alerts.html", {
-        "request": request,
-        "alerts": alerts
-    })
+    return templates.TemplateResponse("doctor_alerts.html", {"request": request, "alerts": alerts})
 
 # IT Admin dashboard
 @app.get("/dashboard/system", response_class=HTMLResponse)
-def dashboard_system(request: Request, device_id: str = None):
+async def dashboard_system(request: Request, device_id: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("access_token")
     if not token:
         return RedirectResponse("/login")
@@ -507,20 +521,16 @@ def dashboard_system(request: Request, device_id: str = None):
         if "it_admin" not in roles:
             raise Exception("Access denied")
     except:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "Access denied to the system dashboard."
-        })
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Access denied to the system dashboard."})
 
-    db = SessionLocal()
-    all_devices = db.query(SystemStatus.device_id).distinct().all()
-    device_ids = [d[0] for d in all_devices]
-    selected_device = device_id or device_ids[0] if device_ids else None
+    result = await db.execute(select(SystemStatus.device_id).distinct())
+    device_ids = [r[0] for r in result.all()]
+    selected_device = device_id or (device_ids[0] if device_ids else None)
 
-    records = db.query(SystemStatus)\
-        .filter_by(device_id=selected_device)\
-        .order_by(SystemStatus.timestamp.desc()).limit(50).all()
-    db.close()
+    records = []
+    if selected_device:
+        result = await db.execute(select(SystemStatus).filter_by(device_id=selected_device).order_by(SystemStatus.timestamp.desc()).limit(50))
+        records = result.scalars().all()
 
     timestamps = [r.timestamp.strftime("%H:%M:%S") for r in reversed(records)]
     disk_free = [r.disk_free_percent for r in reversed(records)]
@@ -532,7 +542,6 @@ def dashboard_system(request: Request, device_id: str = None):
     status = [r.status for r in reversed(records)]
     data_frequency = [r.data_frequency_seconds for r in reversed(records)]
     os_versions = [r.os_version for r in reversed(records)]
-
 
     return templates.TemplateResponse("system_dashboard.html", {
         "request": request,
@@ -552,7 +561,7 @@ def dashboard_system(request: Request, device_id: str = None):
 
 # IT Admin dashboard list
 @app.get("/dashboard/system/list", response_class=HTMLResponse)
-def dashboard_system_list(request: Request):
+async def dashboard_system_list(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("access_token")
     if not token:
         return RedirectResponse("/login")
@@ -562,26 +571,19 @@ def dashboard_system_list(request: Request):
         if "it_admin" not in payload.get("realm_access", {}).get("roles", []):
             raise Exception("Access denied")
     except:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "Access denied to the list of system status."
-        })
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Access denied to the list of system status."})
 
-    db = SessionLocal()
-    records = db.query(SystemStatus).order_by(SystemStatus.timestamp.desc()).limit(100).all()
-    db.close()
+    result = await db.execute(select(SystemStatus).order_by(SystemStatus.timestamp.desc()).limit(100))
+    records = result.scalars().all()
 
-    return templates.TemplateResponse("system_list.html", {
-        "request": request,
-        "records": records
-    })
+    return templates.TemplateResponse("system_list.html", {"request": request, "records": records})
 
 # IT Admin dashboard alerts
 @app.get("/dashboard/system/alerts", response_class=HTMLResponse)
-def system_alerts_dashboard(request: Request):
+async def system_alerts_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("access_token")
     if not token:
-        return RedirectResponse(url="/login")
+        return RedirectResponse("/login")
 
     try:
         payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
@@ -589,34 +591,26 @@ def system_alerts_dashboard(request: Request):
         if "it_admin" not in roles:
             raise Exception("Access denied")
     except:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "Access denied to the system alerts."
-        })
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Access denied to the system alerts."})
 
-    db = SessionLocal()
-    alerts = db.query(SystemStatus)\
-               .filter(
-                   (SystemStatus.disk_free_percent < 10) |
-                   (SystemStatus.update_required == True) |
-                   (SystemStatus.checksum_valid == False) |
-                   (SystemStatus.status != 1)
-               )\
-               .order_by(SystemStatus.timestamp.desc())\
-               .limit(50).all()
-    db.close()
+    stmt = select(SystemStatus).where(
+        (SystemStatus.disk_free_percent < 10) |
+        (SystemStatus.update_required == True) |
+        (SystemStatus.checksum_valid == False) |
+        (SystemStatus.status != 1)
+    ).order_by(SystemStatus.timestamp.desc()).limit(50)
 
-    return templates.TemplateResponse("system_alerts.html", {
-        "request": request,
-        "alerts": alerts
-    })
+    result = await db.execute(stmt)
+    alerts = result.scalars().all()
+
+    return templates.TemplateResponse("system_alerts.html", {"request": request, "alerts": alerts})
 
 # IT Admin dashboard logs
 @app.get("/dashboard/logs", response_class=HTMLResponse)
-def view_logs(request: Request):
+async def view_logs(request: Request):
     token = request.cookies.get("access_token")
     if not token:
-        return RedirectResponse(url="/login")
+        return RedirectResponse("/login")
 
     try:
         payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
@@ -624,24 +618,15 @@ def view_logs(request: Request):
         if "it_admin" not in roles:
             raise Exception("Access denied")
     except:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "Access denied to the logs."
-        })
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Access denied to the logs."})
 
     if not os.path.exists(LOG_PATH):
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "Log file not found."
-        })
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Log file not found."})
 
     with open(LOG_PATH, "r") as f:
-        log_content = f.read()[-5000:]  # Read the last 5000 characters of the log file
+        log_content = f.read()[-5000:]
 
-    return templates.TemplateResponse("logs.html", {
-        "request": request,
-        "logs": log_content
-    })
+    return templates.TemplateResponse("logs.html", {"request": request, "logs": log_content})
 
 # Monitoring
 
@@ -659,46 +644,46 @@ system_alerts_gauge = Gauge("system_alerts_total", "Nombre d'alertes système")
 
 # Prometheus metrics endpoint
 @app.get("/metrics")
-def metrics():
-    db = SessionLocal()
+async def metrics(db: AsyncSession = Depends(get_db)):
     try:
-        # Number of unique devices
-        active = db.query(SensorRecord.device_id).distinct().count()
+        # Nombre de capteurs uniques
+        result = await db.execute(select(func.count(func.distinct(SensorRecord.device_id))))
+        active = result.scalar()
         active_devices.set(active)
 
-        # Number of total sensor records
-        total_sensor = db.query(SensorRecord).count()
+        # Nombre total de mesures capteurs
+        result = await db.execute(select(func.count()).select_from(SensorRecord))
+        total_sensor = result.scalar()
         records_total.set(total_sensor)
 
-        # Number of system status entries
-        total_system = db.query(SystemStatus).count()
+        # Nombre total de rapports système
+        result = await db.execute(select(func.count()).select_from(SystemStatus))
+        total_system = result.scalar()
         system_entries.set(total_system)
 
-        # Number of health alerts
-        health_alerts = db.query(SensorRecord)\
-            .filter(SensorRecord.label == 1)\
-            .order_by(SensorRecord.timestamp.desc()).count()
+        # Nombre d’alertes santé
+        result = await db.execute(select(func.count()).select_from(SensorRecord).where(SensorRecord.label == 1))
+        health_alerts = result.scalar()
         health_alerts_gauge.set(health_alerts)
 
-        # Number of system alerts
-        system_alerts = db.query(SystemStatus)\
-            .filter(
-                (SystemStatus.disk_free_percent < 10) |
-                (SystemStatus.update_required == True) |
-                (SystemStatus.checksum_valid == False) |
-                (SystemStatus.status != 1)
-            )\
-            .order_by(SystemStatus.timestamp.desc())
+        # Nombre d’alertes système
+        result = await db.execute(select(func.count()).select_from(SystemStatus).where(
+            (SystemStatus.disk_free_percent < 10) |
+            (SystemStatus.update_required == True) |
+            (SystemStatus.checksum_valid == False) |
+            (SystemStatus.status != 1)
+        ))
+        system_alerts = result.scalar()
         system_alerts_gauge.set(system_alerts)
 
-    finally:
-        db.close()
+    except Exception as e:
+        logger.error(f"Prometheus metrics error: {e}")
 
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # Metrics dashboard
 @app.get("/dashboard/metrics", response_class=HTMLResponse)
-def metrics_dashboard(request: Request):
+async def metrics_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("access_token")
     if not token:
         return RedirectResponse(url="/login")
@@ -714,32 +699,34 @@ def metrics_dashboard(request: Request):
             "message": "Access denied to the metrics dashboard."
         })
 
-    db = SessionLocal()
-    active = db.query(SensorRecord.device_id).distinct().count()
+    # Métriques communes
+    result = await db.execute(select(func.count(func.distinct(SensorRecord.device_id))))
+    active = result.scalar()
 
+    # Initialisation
     sys_count = -1
     sensor_count = -1
     health_alerts = -1
     system_alerts = -1
 
     if "it_admin" in roles:
-        sys_count = db.query(SystemStatus).count()
-        system_alerts = db.query(SystemStatus)\
-        .filter(
+        result = await db.execute(select(func.count()).select_from(SystemStatus))
+        sys_count = result.scalar()
+
+        result = await db.execute(select(func.count()).select_from(SystemStatus).where(
             (SystemStatus.disk_free_percent < 10) |
             (SystemStatus.update_required == True) |
             (SystemStatus.checksum_valid == False) |
             (SystemStatus.status != 1)
-        )\
-        .order_by(SystemStatus.timestamp.desc()).count()
-    
+        ))
+        system_alerts = result.scalar()
+
     if "doctor" in roles:
-        sensor_count = db.query(SensorRecord).count()
-        health_alerts = db.query(SensorRecord)\
-            .filter(SensorRecord.label == 1)\
-            .order_by(SensorRecord.timestamp.desc()).count()
-    
-    db.close()
+        result = await db.execute(select(func.count()).select_from(SensorRecord))
+        sensor_count = result.scalar()
+
+        result = await db.execute(select(func.count()).select_from(SensorRecord).where(SensorRecord.label == 1))
+        health_alerts = result.scalar()
 
     return templates.TemplateResponse("metrics_dashboard.html", {
         "request": request,
