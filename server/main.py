@@ -46,9 +46,14 @@ from database.models import AsyncSessionLocal, SensorRecord, SystemStatus, Syste
 
 ## Logging
 from logs.scripts.log import logger
+from logs.scripts.ip_context import is_private_ip, get_ip_location
+from logs.scripts.log_rate_tracker import get_user_action_and_rate
 
 # Optional future import (commented out)
 # from keycloak_file_monitor import monitor_keycloak_log
+
+from llm.bert_monitor import monitor_logs_with_llm, incident_responder
+from tasks.system_requests import loop_requests
 
 
 # Change with your Keycloak public key
@@ -68,6 +73,11 @@ CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 LOG_PATH = "logs/server.log"
 
+
+#############################
+# LOGGING
+#############################
+
 class AccessLogMiddleware(BaseHTTPMiddleware):
     EXCLUDED_PATHS = ["/favicon.ico", "/static", "/health", "/robots.txt", "/metrics", "/redirect"]
 
@@ -83,6 +93,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("authorization")
         token = request.cookies.get("access_token")
 
+        location = get_ip_location(ip) if not is_private_ip(ip) else "Private IP"
         username = "-"
         device_id = "-"
         alert = 0
@@ -95,7 +106,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
                 username = payload.get("preferred_username", "-")
             except JWTError:
-                logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" [Invalid Token] {user_agent}")
+                logger.warning(f"{ip} {location} - {username} {device_id} \"{method} {path}\" [Invalid Token] {user_agent}")
 
         if method in ("POST", "PUT") and not path.startswith("/login"):
             try:
@@ -105,43 +116,50 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 device_id = json_data.get("device_id", "-")
                 alert = json_data.get("label", 0)
             except:
-                logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" [Invalid JSON] {user_agent}")
+                logger.warning(f"{ip} {location} - {username} {device_id} \"{method} {path}\" [Invalid JSON] {user_agent}")
 
         response = await call_next(request)
         duration = round((time.time() - start_time) * 1000)
+        action, rate = get_user_action_and_rate(username, path)
 
+        # Prépare le préfixe commun du log
+        log_prefix = f'[Action : {action}] {ip} ({location}) - {username} {device_id} "{method} {path}" {response.status_code} [Request rate: {rate}/min]'
+
+        # Gestion des logs en fonction du chemin
         if path.startswith("/login") and method == "POST":
             if response.status_code == 302:
-                logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Login Success] {user_agent}")
+                logger.info(f"{log_prefix} [Login Success] {user_agent}")
             else:
-                logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Login Failed] {user_agent}")
+                logger.warning(f"{log_prefix} [Login Failed] {user_agent}")
+
         elif path.startswith("/api/sensor") or path.startswith("/api/system-status"):
             async with AsyncSessionLocal() as session:
                 stmt = select(Device).filter(Device.device_id == device_id, Device.username == username)
                 result = await session.execute(stmt)
                 device_match = result.scalar_one_or_none()
 
-                if device_match:
-                    if alert == 1:
-                        logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Normal Sending] [Alert] {user_agent}")
-                    else:
-                        logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Normal Sending] [Safe] {user_agent}")
+                context = "[Normal Device]" if device_match else "[New Device Used]"
+                label = "[Alert]" if alert == 1 else "[Safe]"
+                log_message = f"{log_prefix} {context} {label} {user_agent}"
+
+                if alert == 1:
+                    logger.warning(log_message)
                 else:
-                    if alert == 1:
-                        logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Alert] {user_agent}")
-                    else:
-                        logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Wrong User's Device] [Safe] {user_agent}")
+                    logger.info(log_message)
+
         elif path.startswith("/dashboard"):
-            if response.status_code == 200:
-                logger.info(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Dashboard Access] {user_agent}")
-            else:
-                logger.warning(f"{ip} - {username} {device_id} \"{method} {path}\" {response.status_code} [Dashboard Access Failed] {user_agent}")
+            status = "[Dashboard Access]" if response.status_code == 200 else "[Dashboard Access Failed]"
+            logger.info(f"{log_prefix} {status} {user_agent}") if response.status_code == 200 else \
+                logger.warning(f"{log_prefix} {status} {user_agent}")
+
         else:
-            logger.info(f'{ip} - {username} {device_id} "{method} {path}" {response.status_code} "{user_agent}" {duration}ms')
+            logger.info(f"{log_prefix} {user_agent} {duration}ms")
 
         return response
 
-
+##############################
+# APP INITIALIZATION
+##############################
 
 # Use of slowapi for rate limiting per user
 limiter = Limiter(key_func=get_jwt_username)
@@ -201,7 +219,12 @@ async def get_known_devices(db: AsyncSession):
     all_devices = set(devices_from_sensors + devices_from_system)
     return list(all_devices)
 
-# Index page
+
+
+###############################
+# INDEX PAGE
+###############################
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     token = request.cookies.get("access_token")
@@ -221,6 +244,10 @@ def index(request: Request):
         "roles": roles,
         "username": username
     })
+
+##############################
+# API Endpoints
+##############################
 
 # Receive sensor data
 @app.post("/api/sensor")
@@ -335,6 +362,11 @@ async def check_for_request(
     logger.debug(f"System request : [{device_id}], [GET], [/api/system-request], [NONE]")
     return {"request": False}
 
+
+##############################
+# AUTHENTICATION
+##############################
+
 # Login page
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
@@ -388,45 +420,50 @@ def logout():
     response.delete_cookie("access_token")
     return response
 
+##################################
+# EVENT ON STARTUP
+##################################
 
-# Launch the system requests every minute and clean up old requests
+# Clean db requests and send system check requests
+async def loop_requests():
+    while True:
+        async with AsyncSessionLocal() as db:
+            now = datetime.now(timezone.utc)
+
+            cutoff = now - timedelta(minutes=10)
+            stmt1 = delete(SystemRequest).where(
+                SystemRequest.fulfilled == True,
+                SystemRequest.requested_at < cutoff
+            )
+            result1 = await db.execute(stmt1)
+            if result1.rowcount > 0:
+                logger.info(f"{result1.rowcount} fulfilled system requests cleaned up.")
+
+            cutoff_sys = now - timedelta(days=30)
+            stmt2 = delete(SystemStatus).where(SystemStatus.timestamp < cutoff_sys)
+            result2 = await db.execute(stmt2)
+            if result2.rowcount > 0:
+                logger.info(f"{result2.rowcount} old system status entries deleted (>30d).")
+
+            for device_id in await get_known_devices(db):
+                logger.debug(f"System check request sent to {device_id}")
+                db.add(SystemRequest(device_id=device_id))
+
+            await db.commit()
+
+        await asyncio.sleep(60)
+
+
+# Actions to perform at startup
 @app.on_event("startup")
-async def schedule_system_requests():
-    async def loop_requests():
-        while True:
-            async with AsyncSessionLocal() as db:
-                now = datetime.now(timezone.utc)
-
-                # Delete fulfilled system requests older than 10 minutes
-                cutoff = now - timedelta(minutes=10)
-                stmt1 = delete(SystemRequest).where(
-                    SystemRequest.fulfilled == True,
-                    SystemRequest.requested_at < cutoff
-                )
-                result1 = await db.execute(stmt1)
-                if result1.rowcount > 0:
-                    logger.info(f"🧹 {result1.rowcount} fulfilled system requests cleaned up.")
-
-                # Delete system status older than 30 days
-                cutoff_sys = now - timedelta(days=30)
-                stmt2 = delete(SystemStatus).where(SystemStatus.timestamp < cutoff_sys)
-                result2 = await db.execute(stmt2)
-                if result2.rowcount > 0:
-                    logger.info(f"🧹 {result2.rowcount} old system status entries deleted (>30d).")
-
-                # Add a system request for each known device
-                for device_id in await get_known_devices(db):
-                    logger.debug(f"📡 System check request sent to {device_id}")
-                    db.add(SystemRequest(device_id=device_id))
-
-                await db.commit()
-
-            await asyncio.sleep(60)
-
+async def startup_all_tasks():
     asyncio.create_task(loop_requests())
+    asyncio.create_task(monitor_logs_with_llm(LOG_PATH, chunk_size=10, delay=2))
+    asyncio.create_task(incident_responder())
 
-
+#################################################
 # DASHBOARD
+#################################################
 
 # Doctor dashboard
 @app.get("/dashboard/doctor", response_class=HTMLResponse)
@@ -628,7 +665,9 @@ async def view_logs(request: Request):
 
     return templates.TemplateResponse("logs.html", {"request": request, "logs": log_content})
 
+#######################################
 # Monitoring
+#######################################
 
 # Health check endpoint
 @app.get("/health", response_class=PlainTextResponse)

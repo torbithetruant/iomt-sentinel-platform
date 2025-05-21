@@ -19,3 +19,6 @@ server/logs/*.log
 
 # Database
 server/data.db
+
+# Copyright
+server/database/GeoLite2-City.mmdb
