@@ -10,3 +10,4 @@ slowapi
 jinja2
 python-multipart
 asyncpg
+geoip2
