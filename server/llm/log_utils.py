@@ -17,7 +17,7 @@ def build_context_from_logs(log_group):
         action = log.get("action", "unknown_action")
         rate = log.get("rate", "?/min")
 
-        sentence = f"{timestamp} — [Action: {action}] from {location}, IP {ip} "
+        sentence = f"At {timestamp} — From {location}, IP {ip} "
 
         if "GET" in endpoint:
             if status == "200":
@@ -126,3 +126,122 @@ def parse_last_logs_from_raw_file(log_path, block_size=10):
     return block_texts
 
 
+def extract_features_from_line_detailed(line: str) -> dict:
+    features = {
+        "hour": 0,
+        "ip_is_private": 1,
+        "country": "unknown",
+        "user_is_patient": 0,
+        "user_is_doctor": 0,
+        "user_is_itadmin": 0,
+        "endpoint_sensor": 0,
+        "endpoint_status": 0,
+        "endpoint_login": 0,
+        "endpoint_dashboard": 0,
+        "method_post": 0,
+        "method_get": 0,
+        "status_code": 0,
+        "rate": 0,
+        "tag_alert": 0,
+        "tag_wrong_device": 0,
+        "tag_login_failed": 0,
+        "tag_invalid_token": 0,
+        "user_agent_type": "unknown"
+    }
+
+    try:
+        # Timestamp & heure
+        match = re.search(r"\[(\d{4}-\d{2}-\d{2} \d{2}):(\d{2}):(\d{2})", line)
+        if match:
+            features["hour"] = int(match.group(1).split(" ")[1])
+
+        # IP & localisation
+        if "Private IP" in line:
+            features["ip_is_private"] = 1
+            features["country"] = "private"
+        else:
+            loc_match = re.search(r"\(([^)]+)\)", line)
+            features["ip_is_private"] = 0
+            features["country"] = loc_match.group(1) if loc_match else "unknown"
+
+        # Utilisateur
+        user_match = re.search(r"- (\S+)", line)
+        user = user_match.group(1) if user_match else "-"
+        if user.startswith("patient"):
+            features["user_is_patient"] = 1
+        elif user.startswith("doctor"):
+            features["user_is_doctor"] = 1
+        elif user.startswith("it_admin"):
+            features["user_is_itadmin"] = 1
+
+        # Endpoint
+        if "/api/sensor" in line:
+            features["endpoint_sensor"] = 1
+        if "/api/system-status" in line:
+            features["endpoint_status"] = 1
+        if "/login" in line:
+            features["endpoint_login"] = 1
+        if "/dashboard" in line:
+            features["endpoint_dashboard"] = 1
+
+        # Méthode
+        if "POST" in line:
+            features["method_post"] = 1
+        if "GET" in line:
+            features["method_get"] = 1
+
+        # Status
+        status_match = re.search(r"\s(\d{3})\s", line)
+        if status_match:
+            features["status_code"] = int(status_match.group(1))
+
+        # Request rate
+        rate_match = re.search(r"\[Request rate:\s*([^\]]+)\]", line)
+        if rate_match:
+            features["rate"] = int(rate_match.group(1).split("/")[0])
+
+        # Tags
+        features["tag_alert"] = int("Alert" in line)
+        features["tag_wrong_device"] = int("New Device" in line)
+        features["tag_login_failed"] = int("Login Failed" in line)
+        features["tag_invalid_token"] = int("Invalid Token" in line)
+
+        # User-Agent
+        if "sqlmap" in line.lower():
+            features["user_agent_type"] = "sqlmap"
+        elif "python-requests" in line.lower():
+            features["user_agent_type"] = "python"
+        elif "mozilla" in line.lower():
+            features["user_agent_type"] = "browser"
+
+    except Exception as e:
+        print("Error parsing line:", e)
+
+    return features
+
+def encode_features_dict_to_vector(features: dict) -> list:
+    vector = [
+        features["hour"],
+        features["ip_is_private"],
+        features["user_is_patient"],
+        features["user_is_doctor"],
+        features["user_is_itadmin"],
+        features["endpoint_sensor"],
+        features["endpoint_status"],
+        features["endpoint_login"],
+        features["endpoint_dashboard"],
+        features["method_post"],
+        features["method_get"],
+        features["status_code"],
+        features["rate"],
+        features["tag_alert"],
+        features["tag_wrong_device"],
+        features["tag_login_failed"],
+        features["tag_invalid_token"]
+    ]
+
+    # Encodage simple de user_agent_type
+    agent_map = {"python": 0, "browser": 1, "sqlmap": 2, "unknown": 3}
+    vector.append(agent_map.get(features["user_agent_type"], 3))
+
+    return vector
