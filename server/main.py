@@ -22,7 +22,7 @@ from starlette.requests import Request as StarletteRequest
 from pydantic import BaseModel
 
 ## SQLAlchemy (Async)
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +42,7 @@ from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATE
 from auth import require_role, get_jwt_username
 
 ## Database Models
-from database.models import AsyncSessionLocal, SensorRecord, SystemStatus, SystemRequest, Device
+from database.models import AsyncSessionLocal, SensorRecord, SystemStatus, SystemRequest, Device, DeviceTrust
 
 ## Logging
 from logs.scripts.log import logger
@@ -52,8 +52,7 @@ from logs.scripts.log_rate_tracker import get_user_action_and_rate
 # Optional future import (commented out)
 # from keycloak_file_monitor import monitor_keycloak_log
 
-from llm.bert_monitor import monitor_logs_with_llm, incident_responder
-from tasks.system_requests import loop_requests
+# from llm.bert_monitor import monitor_logs_with_llm, incident_responder
 
 
 # Change with your Keycloak public key
@@ -205,6 +204,14 @@ class UserAccountData(BaseModel):
     email: str
     role: str
 
+class TrustUpdateRequest(BaseModel):
+    device_id: str
+    num_anomalies_last_hour: int = 0
+    failed_auth_ratio: float = 0.0       # between 0 and 1
+    ip_drift_score: float = 0.0          # between 0 and 1
+    endpoint_unusual: bool = False
+    system_alert: bool = False           # ex: checksum error or disk alert
+
 async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
@@ -219,6 +226,14 @@ async def get_known_devices(db: AsyncSession):
     all_devices = set(devices_from_sensors + devices_from_system)
     return list(all_devices)
 
+def calculate_trust_score(data: TrustUpdateRequest) -> float:
+    score = 1.0
+    score -= 0.3 * data.num_anomalies_last_hour
+    score -= 0.2 * data.failed_auth_ratio
+    score -= 0.2 * data.ip_drift_score
+    score -= 0.1 if data.endpoint_unusual else 0.0
+    score -= 0.1 if data.system_alert else 0.0
+    return max(0.0, min(1.0, score))  # Clamp to [0,1]
 
 
 ###############################
@@ -362,6 +377,64 @@ async def check_for_request(
     logger.debug(f"System request : [{device_id}], [GET], [/api/system-request], [NONE]")
     return {"request": False}
 
+##############################
+# SCORING
+##############################
+
+# Trust Score Update Background Task
+async def loop_trust_scores():
+    while True:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Device.device_id))
+            device_ids = [row[0] for row in result.all()]
+
+            for device_id in device_ids:
+                # Dummy features for now (replace with real data aggregation)
+                features = TrustUpdateRequest(
+                    device_id=device_id,
+                    num_anomalies_last_hour=0,
+                    failed_auth_ratio=0.0,
+                    ip_drift_score=0.0,
+                    endpoint_unusual=False,
+                    system_alert=False
+                )
+                new_score = calculate_trust_score(features)
+
+                existing = await db.execute(select(DeviceTrust).where(DeviceTrust.device_id == device_id))
+                row = existing.scalar_one_or_none()
+
+                if not row:
+                    db.add(DeviceTrust(device_id=device_id, trust_score=new_score, updated_at=datetime.now(timezone.utc)))
+                elif abs(row.trust_score - new_score) >= 0.01:
+                    await db.execute(update(DeviceTrust).where(DeviceTrust.device_id == device_id).values(
+                        trust_score=new_score,
+                        updated_at=datetime.now(timezone.utc)
+                    ))
+            await db.commit()
+        await asyncio.sleep(60)
+
+# Trust Score Dashboard
+@app.get("/dashboard/trust", response_class=HTMLResponse)
+async def trust_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
+    token = request.cookies.get("access_token")
+    if not token:
+        return RedirectResponse("/login")
+
+    try:
+        payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
+        roles = payload.get("realm_access", {}).get("roles", [])
+        if "it_admin" not in roles:
+            raise Exception("Access denied")
+    except:
+        return templates.TemplateResponse("error.html", {"request": request, "message": "Vous n'avez pas les droits requis."})
+    
+    result = await db.execute(select(DeviceTrust).order_by(DeviceTrust.trust_score.asc()))
+    trust_records = result.scalars().all()
+
+    return templates.TemplateResponse("trust_dashboard.html", {
+        "request": request,
+        "trust_records": trust_records
+    })
 
 ##############################
 # AUTHENTICATION
@@ -458,8 +531,9 @@ async def loop_requests():
 @app.on_event("startup")
 async def startup_all_tasks():
     asyncio.create_task(loop_requests())
-    asyncio.create_task(monitor_logs_with_llm(LOG_PATH, chunk_size=10, delay=2))
-    asyncio.create_task(incident_responder())
+    asyncio.create_task(loop_trust_scores())
+    # asyncio.create_task(monitor_logs_with_llm(LOG_PATH, chunk_size=10, delay=2))
+    # asyncio.create_task(incident_responder())
 
 #################################################
 # DASHBOARD
