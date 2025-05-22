@@ -1,0 +1,48 @@
+<!-- templates/trust_dashboard.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Device Trust Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 text-gray-900">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-6 text-center">🔐 Trust Scores for IoMT Devices</h1>
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white shadow-md rounded-lg overflow-hidden">
+                <thead class="bg-gray-800 text-white">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-sm font-medium">Device ID</th>
+                        <th class="px-6 py-3 text-left text-sm font-medium">Trust Score</th>
+                        <th class="px-6 py-3 text-left text-sm font-medium">Updated At</th>
+                        <th class="px-6 py-3 text-left text-sm font-medium">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in trust_records %}
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="px-6 py-4">{{ entry.device_id }}</td>
+                        <td class="px-6 py-4">{{ '{:.2f}'.format(entry.trust_score) }}</td>
+                        <td class="px-6 py-4">{{ entry.updated_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+                        <td class="px-6 py-4">
+                            {% if entry.trust_score >= 0.8 %}
+                                <span class="text-green-600 font-semibold">✅ Trusted</span>
+                            {% elif entry.trust_score >= 0.5 %}
+                                <span class="text-yellow-600 font-semibold">⚠️ Medium</span>
+                            {% else %}
+                                <span class="text-red-600 font-semibold">🚨 Risky</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center py-6 text-gray-500">No trust score data available.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

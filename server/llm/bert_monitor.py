@@ -3,7 +3,7 @@ import time
 import asyncio
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from log_utils import parse_last_logs_from_raw_file, build_context_from_logs
+from llm.log_utils import parse_last_logs_from_raw_file, build_context_from_logs
 
 model_path = "llm/tinybert-logs"
 

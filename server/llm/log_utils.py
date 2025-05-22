@@ -3,66 +3,66 @@ import re
 # This function takes a list of log entries and builds a context string for each entry.
 def build_context_from_logs(log_group):
     context = []
-    last_ip_per_user = {}
 
     for log in log_group:
         timestamp = log.get("timestamp", "")
-        ip = log.get("ip", "pas d’IP")
-        user = log.get("user", "pas de user")
+        ip = log.get("ip", "no IP")
+        location = log.get("location", "unknown location")
+        user = log.get("user", "unknown user")
         device = log.get("device", "")
         endpoint = log.get("endpoint", "/")
         status = log.get("status", "")
         status_tag = log.get("status_tag", "")
         detection = log.get("detection", "")
+        action = log.get("action", "unknown_action")
+        rate = log.get("rate", "?/min")
 
-        if endpoint.startswith("POST") and user != "unknown user":
-            previous_ip = last_ip_per_user.get(user)
-            if previous_ip and previous_ip != ip:
-                context.append(
-                    f"Alerte : l’utilisateur {user} a changé d’adresse IP, passant de {previous_ip} à {ip} pour une requête POST."
-                )
-            last_ip_per_user[user] = ip
+        sentence = f"{timestamp} — [Action: {action}] from {location}, IP {ip} "
 
-        sentence = f"{timestamp} : "
         if "GET" in endpoint:
             if status == "200":
-                sentence += f"{user} a accédé à l’interface {endpoint} via depuis l’adresse IP {ip}.\n"
+                sentence += f"{user} accessed the interface {endpoint}. "
             else:
-                sentence += f"{user} a tenté d’accéder à l’interface {endpoint} depuis l’adresse IP {ip}.\n"
+                sentence += f"{user} attempted to access {endpoint} and failed. "
         elif "/api/sensor" in endpoint:
-            sentence += f"{user} a envoyé des données médicales avec le capteur {device} depuis {ip}.\n"
+            sentence += f"{user} uploaded medical data using device {device}. "
             if status_tag == "Alert":
-                sentence += f" Une alerte médicale a été détectée dans les données envoyées.\n"
+                sentence += "Medical anomaly detected in the data. "
             if detection == "Wrong User's Device":
-                sentence += f" (Capteur {device} non associé à {user} — potentielle attaque).\n"
+                sentence += "Device not registered to this user — possible attack. "
         elif "/api/system-status" in endpoint:
-            sentence += f"{user} a transmis l’état système du dispositif {device} via {ip}.\n"
+            sentence += f"{user} sent system status for device {device}. "
             if status_tag == "Alert":
-                sentence += f" Une alerte système a été détectée.\n"
+                sentence += "System alert reported. "
             if detection == "Wrong User's Device":
-                sentence += f" (Capteur {device} non associé à {user} — potentielle attaque).\n"
+                sentence += "Device not registered to this user — possible attack. "
         elif "/login" in endpoint:
             if detection == "Login Failed":
-                sentence += f"{user} a échoué à se connecter depuis {ip} (possiblement attaque brute force).\n"
+                sentence += f"{user} failed to log in — possible brute force. "
             else:
-                sentence += f"{user} a réussi à se connecter depuis {ip}.\n"
+                sentence += f"{user} successfully logged in. "
         elif "/dashboard" in endpoint:
             if detection == "Access Failed":
-                sentence += f"{user} a tenté d’accéder à l’interface depuis {ip} mais a échoué.\n"
+                sentence += f"{user} failed to access dashboard. "
             else:
-                sentence += f"{user} a accédé à l’interface depuis {ip}.\n"
+                sentence += f"{user} accessed the dashboard. "
         elif "Invalid Token" in detection:
-            sentence += f"{user} a tenté d’accéder à l’interface avec un token invalide depuis {ip}.\n"
+            sentence += f"{user} attempted access with an invalid token. "
         else:
-            sentence += f"{user} a effectué une requête {endpoint} avec {device} depuis {ip}."
+            sentence += f"{user} made a request to {endpoint} with device {device}. "
 
+        sentence += f"(Rate: {rate})"
         context.append(sentence)
 
     return " ".join(context)
 
+
+
 # This function takes a log file path and reads the last 'block_size' lines from it.
 # It parses each line to extract relevant information and returns a list of dictionaries.
 # Each dictionary contains the parsed information from a log entry.
+import re
+
 def parse_last_logs_from_raw_file(log_path, block_size=10):
     with open(log_path, "r") as f:
         lines = f.readlines()[-block_size:]
@@ -70,46 +70,59 @@ def parse_last_logs_from_raw_file(log_path, block_size=10):
     block_texts = []
     for line in lines:
         try:
-            timestamp = re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", line).group()
-            ip = re.search(r"\d+\.\d+\.\d+\.\d+", line).group()
+            timestamp = re.search(r"\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", line)
+            timestamp = timestamp.group()[1:] if timestamp else ""
+
+            ip_match = re.search(r"(\d+\.\d+\.\d+\.\d+)", line)
+            ip = ip_match.group(1) if ip_match else "unknown_ip"
+
+            location_match = re.search(r"\(([^)]+)\)", line)
+            location = location_match.group(1) if location_match else "unknown_location"
+
             user_device_match = re.search(r"- (\S+) (\S+)", line)
-            user = user_device_match.group(1) if user_device_match else "random user"
-            if user == "-":
-                user = "random user"
+            user = user_device_match.group(1) if user_device_match else "unknown_user"
             device = user_device_match.group(2) if user_device_match else "unknown_device"
-            if device == "-":
-                device = ""
+
             request_match = re.search(r"\"(GET|POST|PUT|DELETE) [^\"]+\"", line)
             request = request_match.group() if request_match else "UNKNOWN"
+
             status_code = re.search(r"\s(\d{3})\s", line)
             status_code = status_code.group(1) if status_code else "000"
 
-            alert = ""
+            action_match = re.search(r"\[Action\s*:\s*(.*?)\]", line)
+            action = action_match.group(1) if action_match else "unknown_action"
+
+            rate_match = re.search(r"\[Request rate:\s*([^\]]+)\]", line)
+            request_rate = rate_match.group(1) if rate_match else "0/min"
+
+            alert = "Alert" if "Alert" in line else ""
             detection = ""
-            if "Alert" in line:
-                alert = "Alert"
-            elif "Login Failed" in line:
+            if "Login Failed" in line:
                 detection = "Login Failed"
             elif "Access Failed" in line:
                 detection = "Access Failed"
             elif "Invalid Token" in line:
                 detection = "Invalid Token"
-            elif "Wrong User's Device" in line:
+            elif "New Device" in line:
                 detection = "Wrong User's Device"
 
-            summary = {
+            block_texts.append({
                 "timestamp": timestamp,
                 "ip": ip,
+                "location": location,
                 "user": user,
                 "device": device,
                 "endpoint": request,
                 "status": status_code,
                 "status_tag": alert,
-                "detection": detection
-            }
-            block_texts.append(summary)
+                "detection": detection,
+                "action": action,
+                "rate": request_rate
+            })
 
-        except:
+        except Exception:
             continue
 
     return block_texts
+
+

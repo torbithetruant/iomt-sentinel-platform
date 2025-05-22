@@ -1,6 +1,6 @@
 import requests
 import asyncio
-from database.models import AsyncSessionLocal, UserAccount
+from models import AsyncSessionLocal, UserAccount
 from sqlalchemy import delete
 
 # === CONFIGURATION ===
