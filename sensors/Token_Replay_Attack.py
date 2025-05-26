@@ -31,7 +31,7 @@ def get_token(username, password="test123"):
         return None
 
 # 🔓 Token JWT volé (copié ou intercepté)
-STOLEN_TOKEN = get_token("patient_050", "test123")
+STOLEN_TOKEN = get_token("patient_040", "test123")
 
 # Ajout du token volé dans les headers de la requête
 headers = {

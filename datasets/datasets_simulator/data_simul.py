@@ -155,7 +155,7 @@ def generate_admin_doctor_normal_block(user_type: str, user_id: int, base_time: 
     return lines
 
 
-def generate_log_file(output_log="datasets/iomt_realistic.log", num_blocks=1000, anomaly_ratio=0.1):
+def generate_log_file(output_log="datasets/iomt_realistic.log", num_blocks=1000, anomaly_ratio=0.2):
     os.makedirs(os.path.dirname(output_log), exist_ok=True)
     base_time = datetime.datetime(2025, 5, 21, 13, 30, 0)
 
@@ -193,17 +193,33 @@ def generate_log_file(output_log="datasets/iomt_realistic.log", num_blocks=1000,
 
     blocks = []
 
-    for i in range(num_anomalies):
+    num_ano1 = int(num_anomalies / 3)
+    num_ano2 = int(num_anomalies - num_ano1)
+
+    num_norm1 = int(num_normals / 2)
+    num_norm2 = int(num_normals - num_norm1)
+
+
+    for i in range(num_ano1):
         gen_func = random.choice(anomaly_generators)
         block = gen_func(i, base_time + datetime.timedelta(seconds=i * 5))
         blocks.append(block)
 
-    for i in range(num_normals):
+    for i in range(num_norm1):
         gen_func = random.choice(normal_generators)
         block = gen_func(i + num_anomalies, base_time + datetime.timedelta(seconds=(i + num_anomalies) * 5))
         blocks.append(block)
 
-    random.shuffle(blocks)
+    for i in range(num_ano2):
+        gen_func = random.choice(anomaly_generators)
+        block = gen_func(i, base_time + datetime.timedelta(seconds=i * 5))
+        blocks.append(block)
+
+    for i in range(num_norm2):
+        gen_func = random.choice(normal_generators)
+        block = gen_func(i + num_anomalies, base_time + datetime.timedelta(seconds=(i + num_anomalies) * 5))
+        blocks.append(block)
+
 
     label_counts = {0: 0, 1: 0}
     with open(output_log, "w", encoding="utf-8") as f:
@@ -224,4 +240,4 @@ def generate_log_file(output_log="datasets/iomt_realistic.log", num_blocks=1000,
     print(f"📊 Répartition des labels : Normal = {label_counts[0]}, Anomalie = {label_counts[1]}")
 
 # Exemple d'appel
-generate_log_file("datasets/iomt_realistic.log", num_blocks=100000)
+generate_log_file("datasets/iomt_realistic.log", num_blocks=200000)

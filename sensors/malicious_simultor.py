@@ -14,7 +14,7 @@ CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 # === SIMULATION PARAMS ===
-CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 101)]
+CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 4)]
 
 PATIENT_PROFILES = [
     {"type": "sportif", "base_hr": 60, "base_spo2": 98, "base_temp": 36.3, "risk": 0.05},
@@ -175,10 +175,10 @@ def simulate_capteur(capteur):
 
 # Lancer tous les capteurs en threads
 for i, capteur in enumerate(CAPTEURS):
-    time.sleep(0.2 * i)  # délai croissant
+    time.sleep(1)  # délai croissant
     threading.Thread(target=simulate_capteur, args=(capteur,), daemon=True).start()
 
 
 # Boucle infinie principale
 while True:
-    time.sleep(60)
+    time.sleep(10)

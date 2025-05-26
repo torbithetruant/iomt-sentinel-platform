@@ -2,7 +2,10 @@ import os
 import csv
 import re
 
-# This function takes a list of log entries and builds a context string for each entry.
+EXTERNAL_IPS = ["212.47.240.12", "88.198.55.76", "185.199.108.153"]
+SUSPICIOUS_UAS = ["sqlmap/1.5.2#stable (http://sqlmap.org)", "curl/7.68.0", "UnknownAgent/1.0"]
+
+# === Context Builder ===
 def build_context_from_logs(log_group):
     context = []
 
@@ -58,13 +61,7 @@ def build_context_from_logs(log_group):
 
     return " ".join(context)
 
-
-
-# This function takes a log file path and reads the last 'block_size' lines from it.
-# It parses each line to extract relevant information and returns a list of dictionaries.
-# Each dictionary contains the parsed information from a log entry.
-import re
-
+# === Log Parser ===
 def parse_last_logs_from_raw_file(log_path, block_size=10):
     with open(log_path, "r") as f:
         lines = f.readlines()[-block_size:]
@@ -127,12 +124,13 @@ def parse_last_logs_from_raw_file(log_path, block_size=10):
 
     return block_texts
 
-def convert_log_to_dataset(log_path: str, output_csv: str, block_size: int = 10):
+# === Dataset Builder (Dynamic Labeling) ===
+def convert_log_to_dataset_dynamic_label(log_path: str, output_csv: str, block_size: int = 10):
     if not os.path.exists(log_path):
         raise FileNotFoundError(f"Fichier introuvable : {log_path}")
 
     with open(log_path, "r", encoding="utf-8") as f:
-        all_lines = [line.strip() for line in f if line.strip()]  # ignore lignes vides
+        all_lines = [line.strip() for line in f if line.strip()]
 
     num_blocks = len(all_lines) // block_size
     dataset = []
@@ -140,23 +138,25 @@ def convert_log_to_dataset(log_path: str, output_csv: str, block_size: int = 10)
 
     for i in range(num_blocks):
         block = all_lines[i * block_size:(i + 1) * block_size]
-        label = 0
-        cleaned_lines = []
-
-        for line in block:
-            match = re.match(r"#LABEL:(\d)(.*)", line)
-            if match:
-                label_candidate = int(match.group(1))
-                if label_candidate == 1:
-                    label = 1
-                line = match.group(2).strip()
-            cleaned_lines.append(line)
-
         with open("tmp_block.log", "w", encoding="utf-8") as tmp:
-            tmp.write("\n".join(cleaned_lines))
+            tmp.write("\n".join(block))
 
-        parsed_logs = parse_last_logs_from_raw_file("tmp_block.log", block_size=len(cleaned_lines))
+        parsed_logs = parse_last_logs_from_raw_file("tmp_block.log", block_size=len(block))
         context = build_context_from_logs(parsed_logs)
+
+        # === Expanded Anomaly Detection ===
+        anomaly_count = 0
+        for log in parsed_logs:
+            rate = int(log["rate"].split("/")[0]) if log["rate"].split("/")[0].isdigit() else 0
+            if (log["status_tag"] == "Alert" or
+                log["detection"] in ["Login Failed", "Wrong User's Device"] or
+                rate > 10 or
+                log["ip"] in EXTERNAL_IPS or
+                any(agent in log["endpoint"] for agent in SUSPICIOUS_UAS) or
+                log["user"] == "-" or log["device"] == "-"):
+                anomaly_count += 1
+
+        label = 1 if (anomaly_count / len(parsed_logs)) >= 0.5 else 0
 
         if context.strip():
             dataset.append({"context": context.strip(), "label": label})
@@ -170,11 +170,8 @@ def convert_log_to_dataset(log_path: str, output_csv: str, block_size: int = 10)
         writer.writeheader()
         writer.writerows(dataset)
 
-    print(f"✅ Dataset sauvegardé : {output_csv}")
-    print(f"💡 Nombre total de blocs : {num_blocks}")
-    print(f"✔️ Blocs valides : {len(dataset)}")
-    print(f"🚫 Blocs ignorés (vides ou invalides) : {skipped_blocks}")
+    print(f"✅ Dataset saved: {output_csv} (Anomaly blocks: {sum(1 for d in dataset if d['label']==1)}/{len(dataset)})")
 
-# Exemple d'utilisation
+# === Example Usage ===
 if __name__ == "__main__":
-    convert_log_to_dataset("datasets/iomt_realistic.log", "datasets/bert_finetune_dataset.csv", block_size=10)
+    convert_log_to_dataset_dynamic_label("datasets/iomt_logs.log", "datasets/bert_finetune_dataset.csv", block_size=10)

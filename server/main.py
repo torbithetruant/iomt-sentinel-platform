@@ -52,7 +52,9 @@ from logs.scripts.log_rate_tracker import get_user_action_and_rate
 # Optional future import (commented out)
 # from keycloak_file_monitor import monitor_keycloak_log
 
-# from llm.bert_monitor import monitor_logs_with_llm, incident_responder
+from security.incident_handler import incident_responder, monitor_logs_with_llm
+import security.anomaly_state
+
 
 
 # Change with your Keycloak public key
@@ -235,7 +237,6 @@ def calculate_trust_score(data: TrustUpdateRequest) -> float:
     score -= 0.1 if data.system_alert else 0.0
     return max(0.0, min(1.0, score))  # Clamp to [0,1]
 
-
 ###############################
 # INDEX PAGE
 ###############################
@@ -389,14 +390,16 @@ async def loop_trust_scores():
             device_ids = [row[0] for row in result.all()]
 
             for device_id in device_ids:
-                # Dummy features for now (replace with real data aggregation)
+                username = security.anomaly_state.get_user_from_device(device_id)
+                metrics = security.anomaly_state.get_full_anomaly_metrics(device_id, username, "")
+
                 features = TrustUpdateRequest(
                     device_id=device_id,
-                    num_anomalies_last_hour=0,
-                    failed_auth_ratio=0.0,
-                    ip_drift_score=0.0,
-                    endpoint_unusual=False,
-                    system_alert=False
+                    num_anomalies_last_hour=metrics["num_anomalies_last_hour"],
+                    failed_auth_ratio=metrics["failed_auth_ratio"],
+                    ip_drift_score=metrics["ip_drift_score"],
+                    endpoint_unusual=metrics["endpoint_unusual"],
+                    system_alert=metrics["system_alert"]
                 )
                 new_score = calculate_trust_score(features)
 
@@ -405,13 +408,20 @@ async def loop_trust_scores():
 
                 if not row:
                     db.add(DeviceTrust(device_id=device_id, trust_score=new_score, updated_at=datetime.now(timezone.utc)))
+                    print(f"🆕 Added new trust score for {device_id}: {new_score}")
                 elif abs(row.trust_score - new_score) >= 0.01:
                     await db.execute(update(DeviceTrust).where(DeviceTrust.device_id == device_id).values(
                         trust_score=new_score,
                         updated_at=datetime.now(timezone.utc)
                     ))
+                    print(f"🔄 Updated trust score for {device_id}: {new_score}")
+                else:
+                    print(f"✅ No update needed for {device_id}: {new_score}")
+
             await db.commit()
         await asyncio.sleep(60)
+
+
 
 # Trust Score Dashboard
 @app.get("/dashboard/trust", response_class=HTMLResponse)
@@ -524,7 +534,7 @@ async def loop_requests():
 
             await db.commit()
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(120)
 
 
 # Actions to perform at startup
@@ -532,8 +542,9 @@ async def loop_requests():
 async def startup_all_tasks():
     asyncio.create_task(loop_requests())
     asyncio.create_task(loop_trust_scores())
-    # asyncio.create_task(monitor_logs_with_llm(LOG_PATH, chunk_size=10, delay=2))
-    # asyncio.create_task(incident_responder())
+    asyncio.create_task(monitor_logs_with_llm(log_path=LOG_PATH, chunk_size=10, delay=1))
+    asyncio.create_task(incident_responder())
+
 
 #################################################
 # DASHBOARD

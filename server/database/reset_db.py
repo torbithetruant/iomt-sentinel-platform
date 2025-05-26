@@ -1,6 +1,6 @@
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
-from database.models import Base, DATABASE_URL
+from models import Base, DATABASE_URL
 
 # Crée un moteur async avec echo pour voir les requêtes SQL
 engine = create_async_engine(DATABASE_URL, echo=True)

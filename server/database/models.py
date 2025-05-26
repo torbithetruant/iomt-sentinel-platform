@@ -65,5 +65,5 @@ class DeviceTrust(Base):
     __tablename__ = "device_trust"
     device_id = Column(String, primary_key=True, unique=True)
     trust_score = Column(Float, default=1.0)
-    updated_at = Column(DateTime, default=datetime.now(timezone.utc))
+    updated_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc))
 
