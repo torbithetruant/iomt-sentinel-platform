@@ -8,6 +8,8 @@ server/database/__pycache__/
 
 server/llm/__pycache__/
 
+server/security/__pycache__
+
 # Fichiers sensibles ou scripts locaux
 config/logs/
 
@@ -24,3 +26,6 @@ server/data.db
 
 # Copyright
 server/database/GeoLite2-City.mmdb
+
+# LLM
+llmserver/llm/

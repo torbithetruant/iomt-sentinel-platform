@@ -14,6 +14,8 @@ device_to_ips = defaultdict(set)
 user_device_ip_history = defaultdict(list)
 anomaly_count_last_hour = defaultdict(list)
 
+ip_denylist = set()
+
 # Get user from device_id
 def get_user_from_device(device_id):
     """
@@ -79,7 +81,7 @@ def get_user_drift_score(device_id):
 # === Endpoint Unusual : L'utilisateur accède-t-il à des endpoints rares ? ===
 
 def is_endpoint_unusual(context):
-    rare_keywords = ["dashboard/system", "/admin", "/api/debug"]
+    rare_keywords = ["/dashboard", "/metrics", "/health"]
     return any(keyword in context for keyword in rare_keywords)
 
 # === Synthèse complète pour un device ===

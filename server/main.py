@@ -4,6 +4,7 @@ import time
 import json
 import asyncio
 import requests
+import math
 import httpx
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -52,7 +53,7 @@ from logs.scripts.log_rate_tracker import get_user_action_and_rate
 # Optional future import (commented out)
 # from keycloak_file_monitor import monitor_keycloak_log
 
-from security.incident_handler import incident_responder, monitor_logs_with_llm
+from security.incident_handler import incident_responder, monitor_logs_with_llm, revoke_user_token, denylist_ip
 import security.anomaly_state
 
 
@@ -206,14 +207,6 @@ class UserAccountData(BaseModel):
     email: str
     role: str
 
-class TrustUpdateRequest(BaseModel):
-    device_id: str
-    num_anomalies_last_hour: int = 0
-    failed_auth_ratio: float = 0.0       # between 0 and 1
-    ip_drift_score: float = 0.0          # between 0 and 1
-    endpoint_unusual: bool = False
-    system_alert: bool = False           # ex: checksum error or disk alert
-
 async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
@@ -227,15 +220,6 @@ async def get_known_devices(db: AsyncSession):
     devices_from_system = [row[0] for row in system_result.all()]
     all_devices = set(devices_from_sensors + devices_from_system)
     return list(all_devices)
-
-def calculate_trust_score(data: TrustUpdateRequest) -> float:
-    score = 1.0
-    score -= 0.3 * data.num_anomalies_last_hour
-    score -= 0.2 * data.failed_auth_ratio
-    score -= 0.2 * data.ip_drift_score
-    score -= 0.1 if data.endpoint_unusual else 0.0
-    score -= 0.1 if data.system_alert else 0.0
-    return max(0.0, min(1.0, score))  # Clamp to [0,1]
 
 ###############################
 # INDEX PAGE
@@ -382,47 +366,6 @@ async def check_for_request(
 # SCORING
 ##############################
 
-# Trust Score Update Background Task
-async def loop_trust_scores():
-    while True:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(select(Device.device_id))
-            device_ids = [row[0] for row in result.all()]
-
-            for device_id in device_ids:
-                username = security.anomaly_state.get_user_from_device(device_id)
-                metrics = security.anomaly_state.get_full_anomaly_metrics(device_id, username, "")
-
-                features = TrustUpdateRequest(
-                    device_id=device_id,
-                    num_anomalies_last_hour=metrics["num_anomalies_last_hour"],
-                    failed_auth_ratio=metrics["failed_auth_ratio"],
-                    ip_drift_score=metrics["ip_drift_score"],
-                    endpoint_unusual=metrics["endpoint_unusual"],
-                    system_alert=metrics["system_alert"]
-                )
-                new_score = calculate_trust_score(features)
-
-                existing = await db.execute(select(DeviceTrust).where(DeviceTrust.device_id == device_id))
-                row = existing.scalar_one_or_none()
-
-                if not row:
-                    db.add(DeviceTrust(device_id=device_id, trust_score=new_score, updated_at=datetime.now(timezone.utc)))
-                    print(f"🆕 Added new trust score for {device_id}: {new_score}")
-                elif abs(row.trust_score - new_score) >= 0.01:
-                    await db.execute(update(DeviceTrust).where(DeviceTrust.device_id == device_id).values(
-                        trust_score=new_score,
-                        updated_at=datetime.now(timezone.utc)
-                    ))
-                    print(f"🔄 Updated trust score for {device_id}: {new_score}")
-                else:
-                    print(f"✅ No update needed for {device_id}: {new_score}")
-
-            await db.commit()
-        await asyncio.sleep(60)
-
-
-
 # Trust Score Dashboard
 @app.get("/dashboard/trust", response_class=HTMLResponse)
 async def trust_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
@@ -541,7 +484,6 @@ async def loop_requests():
 @app.on_event("startup")
 async def startup_all_tasks():
     asyncio.create_task(loop_requests())
-    asyncio.create_task(loop_trust_scores())
     asyncio.create_task(monitor_logs_with_llm(log_path=LOG_PATH, chunk_size=10, delay=1))
     asyncio.create_task(incident_responder())
 
