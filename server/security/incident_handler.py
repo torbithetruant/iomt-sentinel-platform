@@ -19,7 +19,7 @@ last_inode = None
 file_offset = 0
 last_line_number = 0
 
-logger = logging.getLogger("incident_handler")
+logger = logging.getLogger("detection")
 
 # Keycloak API
 CLIENT_ID = "admin-cli"
@@ -104,11 +104,13 @@ async def update_trust_score_for_device(device_id: str, db_session: AsyncSession
     if new_score < THRESHOLD_REVOKE:
         print(f"🚨 Low trust score ({new_score:.2f}) for {device_id} - taking actions!")
         if username != "unknown_user":
-            await revoke_user_token(username)
+            # await revoke_user_token(username)
+            print("Account disabled !")
         ip_list = security.anomaly_state.device_to_ips.get(device_id, set())
         if len(ip_list) >= THRESHOLD_IPS:
             for ip in ip_list:
-                await denylist_ip(ip)
+                # await denylist_ip(ip)
+                print(f"IP : {ip} blocked !")
 
     existing = await db_session.execute(select(DeviceTrust).where(DeviceTrust.device_id == device_id))
     row = existing.scalar_one_or_none()
@@ -116,12 +118,14 @@ async def update_trust_score_for_device(device_id: str, db_session: AsyncSession
     if not row:
         db_session.add(DeviceTrust(device_id=device_id, trust_score=new_score, updated_at=datetime.now(timezone.utc)))
         print(f"🆕 Added new trust score for {device_id}: {new_score:.2f}")
+        logger.info(f"[!] New Score for {device_id} = {new_score}")
     elif abs(row.trust_score - new_score) >= 0.01:
         await db_session.execute(update(DeviceTrust).where(DeviceTrust.device_id == device_id).values(
             trust_score=new_score,
             updated_at=datetime.now(timezone.utc)
         ))
         print(f"🔄 Updated trust score for {device_id}: {new_score:.2f}")
+        logger.info(f"[!] New Score for {device_id} = {new_score}")
     else:
         print(f"✅ No update needed for {device_id}: {new_score:.2f}")
 
@@ -277,17 +281,24 @@ async def handle_detected_threat(context, score, detection_id, db):
         print(f"Location: {metadata['location']}")
         print("-" * 80)
 
-        if metadata['device'] == "unknown_device":
-            print("⚠️ Device is unknown, skipping further actions.")
+        print(f"Il y a {len(causes)} causes !")
+        if len(causes) == 0:
+            # print("⚠️ No specific causes detected, skipping anomaly registration.")
             continue
-        else:
-            security.anomaly_state.register_anomaly_event(
-                device_id=metadata['device'],
-                username=metadata['username'],
-                ip=metadata['ip'],
-                location=metadata['location']
-            )
-            await update_trust_score_for_device(metadata['device'], db)
+
+        if metadata['device'] == "unknown_device":
+            # print("⚠️ Device is unknown, skipping further actions.")
+            continue
+
+        # Enregistrement uniquement si causes détectées
+        security.anomaly_state.register_anomaly_event(
+            device_id=metadata['device'],
+            username=metadata['username'],
+            ip=metadata['ip'],
+            location=metadata['location']
+        )
+        
+        await update_trust_score_for_device(metadata['device'], db)
 
     duration = time.monotonic() - start_time
     logger.info(f"⏱️ Total Threat Handling Time: {duration:.3f} sec")

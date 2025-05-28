@@ -23,9 +23,14 @@ def build_context_from_logs(log_group):
         
         hour = int(timestamp.split(":")[0])
         if 7 <= hour <= 23:
-            sentence = f"At {timestamp} , From {location}, IP {ip} "
+            sentence = f"At {timestamp}, "
         else:
-            sentence = f"At {timestamp} , From {location}, IP {ip} (outside of normal hours) "
+            sentence = f"At {timestamp} (outside of normal hours), "
+
+        if location == "Private IP":
+            sentence += f" normal location, IP {ip}, "
+        else:
+            sentence += f" suspicious location, IP {ip}, "
 
         if "GET" in endpoint:
             if status == "200":
@@ -326,10 +331,8 @@ def extract_anomaly_causes(context: str):
             causes.append("System alert")
         if "Device not registered to this user" in line:
             causes.append("Device mismatch (wrong device)")
-        if re.search(r"From (?!Private IP)", line):
+        if "suspicious location" in line:
             causes.append("External IP or suspicious location")
-        if not causes:
-            causes.append("General anomaly")
 
         anomalies.append({
             "causes": causes,

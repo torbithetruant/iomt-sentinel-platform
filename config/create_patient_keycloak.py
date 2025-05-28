@@ -51,7 +51,7 @@ def create_users(token, role_obj):
         "Content-Type": "application/json"
     }
 
-    for i in range(1, 4):
+    for i in range(1, 21):
         username = f"patient_{str(i).zfill(3)}"
         first_name = random.choice(FIRST_NAMES)
         last_name = random.choice(LAST_NAMES)

@@ -9,7 +9,7 @@ import ipaddress
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 API_SENSOR_URL = "https://localhost:8000/api/sensor"
 API_SYSTEM_URL = "https://localhost:8000/api/system-status"
-CERT_PATH = "../server/certs/cert.pem"
+CERT_PATH = "../../server/certs/cert.pem"
 CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
@@ -96,10 +96,10 @@ def simulate_capteur(capteur, is_target=False):
     while True:
         if is_target:
             anomaly = random.random() < 0.8  # 80% anomalies for target device
-            sleep_time = random.uniform(0.5, 2)  # Faster loop = DoS effect
+            sleep_time = random.uniform(2, 5)  # Faster loop = DoS effect
         else:
             anomaly = random.random() < 0.01  # 1% anomalies for normal devices
-            sleep_time = random.uniform(10, 30)
+            sleep_time = random.uniform(10, 12)
 
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly)
         system_data = generate_system_data(capteur["device_id"], headers["X-Forwarded-For"], capteur["username"], anomaly)

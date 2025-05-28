@@ -9,6 +9,7 @@ os.makedirs("logs", exist_ok=True)
 # Log file paths
 APP_LOG_FILE = "logs/server.log"
 SQL_LOG_FILE = "logs/sql.log"
+DET_LOG_FILE = "logs/anomalies.log"
 
 # Log format
 LOG_FORMAT = "[%(asctime)s] %(levelname)s [%(name)s] %(message)s"
@@ -24,6 +25,9 @@ app_handler.setFormatter(logging.Formatter(LOG_FORMAT))
 # SQL handler (separate file)
 sql_handler = RotatingFileHandler(SQL_LOG_FILE, maxBytes=1_000_000, backupCount=3)
 sql_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+
+det_handler = RotatingFileHandler(DET_LOG_FILE, maxBytes=1_000_000, backupCount=3)
+det_handler.setFormatter(logging.Formatter(LOG_FORMAT))
 
 # === Queue Listener ===
 listener = QueueListener(log_queue, app_handler)
@@ -42,3 +46,7 @@ logging.getLogger("asyncpg").setLevel(logging.WARNING)
 # Optional: log SQL errors in a dedicated file
 sql_logger = logging.getLogger("sqlalchemy.engine")
 sql_logger.addHandler(sql_handler)
+
+logging.getLogger("detection").setLevel(logging.INFO)
+det_logger = logging.getLogger("detection")
+det_logger.addHandler(det_handler)
