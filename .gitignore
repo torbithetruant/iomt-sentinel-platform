@@ -29,3 +29,5 @@ server/database/GeoLite2-City.mmdb
 
 # LLM
 llmserver/llm/
+
+llmserver/__pycache__
