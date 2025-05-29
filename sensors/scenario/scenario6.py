@@ -5,6 +5,7 @@ import requests
 from datetime import datetime
 import ipaddress
 
+
 # === CONFIGURATION ===
 CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 10)]
 CERT_PATH = "../server/certs/cert.pem"
@@ -14,6 +15,13 @@ API_URL = "https://localhost:8000/"
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
+
+PATIENT_PROFILES = [
+    {"type": "sportif", "base_hr": 60, "base_spo2": 98, "base_temp": 36.3, "risk": 0.05},
+    {"type": "standard", "base_hr": 75, "base_spo2": 97, "base_temp": 36.8, "risk": 0.1},
+    {"type": "senior", "base_hr": 85, "base_spo2": 95, "base_temp": 37.0, "risk": 0.2},
+    {"type": "diabétique", "base_hr": 80, "base_spo2": 96, "base_temp": 36.7, "risk": 0.25}
+]
 
 def random_ip():
     return str(ipaddress.IPv4Address(random.randint(0xC0A80001, 0xC0A8FFFF)))  # 192.168.x.x
@@ -37,6 +45,45 @@ def get_token(username, password="test123"):
     except Exception as e:
         print(f"❌ Connection error for {username}: {e}")
         return None
+
+def generate_sensor_data(device_id, anomaly=False, profile=None):
+    base = profile
+    data = {
+        "device_id": device_id,
+        "timestamp": datetime.now().isoformat(),
+        "heart_rate": random.randint(base["base_hr"] - 5, base["base_hr"] + 10),
+        "spo2": round(random.uniform(base["base_spo2"] - 1, base["base_spo2"] + 1.5), 1),
+        "temperature": round(random.uniform(base["base_temp"] - 0.3, base["base_temp"] + 0.4), 1),
+        "systolic_bp": random.randint(110, 135),
+        "diastolic_bp": random.randint(70, 90),
+        "respiration_rate": random.randint(12, 20),
+        "glucose_level": round(random.uniform(4.5, 7.0), 1),
+        "ecg_summary": "Normal sinus rhythm",
+        "label": 0
+    }
+
+    if anomaly:
+        anomaly_types = ["tachy", "hypoxie", "hyperBP", "hypoBP", "glycémie", "resp"]
+        selected = random.sample(anomaly_types, k=random.randint(1, 2))
+        data["label"] = 1
+
+        if "tachy" in selected:
+            data["heart_rate"] = random.randint(110, 150)
+            data["ecg_summary"] = "Anomalous pattern"
+        if "hypoxie" in selected:
+            data["spo2"] = round(random.uniform(90.0, 94.5), 1)
+        if "hyperBP" in selected:
+            data["systolic_bp"] = random.randint(140, 160)
+            data["diastolic_bp"] = random.randint(90, 100)
+        if "hypoBP" in selected:
+            data["systolic_bp"] = random.randint(90, 105)
+            data["diastolic_bp"] = random.randint(60, 70)
+        if "glycémie" in selected:
+            data["glucose_level"] = round(random.uniform(7.5, 10.5), 1)
+        if "resp" in selected:
+            data["respiration_rate"] = random.randint(22, 28)
+
+    return data
 
 def generate_system_data(device_id, ip, username, anomaly=False):
     data = {
@@ -65,6 +112,7 @@ def generate_system_data(device_id, ip, username, anomaly=False):
     return data
 
 def simulate_capteur(capteur):
+    profile = random.choice(PATIENT_PROFILES)
     ip = random_ip()
     token = get_token(capteur["username"])
     if not token:
@@ -78,16 +126,18 @@ def simulate_capteur(capteur):
 
     while True:
         anomaly = random.random() < 0.2 or capteur["device_id"] == "raspi_007" or capteur["device_id"] == "raspi_004" # Moderate anomaly chance
+        health_data = generate_sensor_data(capteur["device_id"], anomaly, profile)
         system_data = generate_system_data(capteur["device_id"], ip, capteur["username"], anomaly)
 
         try:
+            rhealth = requests.post(API_SENSOR_URL, json=health_data, headers=headers, verify=CERT_PATH, timeout=5)
             if anomaly and (capteur["device_id"] == "raspi_007" or capteur["device_id"] == "raspi_004"):
                 r = requests.post(API_URL + "dashboard/system", json=system_data, headers=headers, verify=CERT_PATH, timeout=5)
             else:
                 r = requests.post(API_SYSTEM_URL, json=system_data, headers=headers, verify=CERT_PATH, timeout=5)
             print(f"[{capteur['device_id']}] SYSTEM → {r.status_code} | Endpoint: {system_data['sensor_type']}")
 
-            if r.status_code in [401, 403, 500]:
+            if r.status_code in [401, 403, 500] or rhealth.status_code in [401, 403, 500]:
                 print(f"🔁 Refreshing token for {capteur['device_id']}")
                 token = get_token(capteur["username"])
                 if token:
@@ -96,7 +146,7 @@ def simulate_capteur(capteur):
         except Exception as e:
             print(f"❌ Network error for {capteur['device_id']}: {e}")
 
-        time.sleep(random.randint(5, 15))  # Faster rate for testing
+        time.sleep(random.randint(10, 15))  # Faster rate for testing
 
 # Lancer les capteurs
 for capteur in CAPTEURS:
