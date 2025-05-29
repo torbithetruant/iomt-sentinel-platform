@@ -6,10 +6,11 @@ from datetime import datetime
 import ipaddress
 
 # === CONFIGURATION ===
-CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 4)]
+CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 10)]
 CERT_PATH = "../server/certs/cert.pem"
 API_SENSOR_URL = "https://localhost:8000/api/sensor"
 API_SYSTEM_URL = "https://localhost:8000/api/system-status"
+API_URL = "https://localhost:8000/"
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
@@ -76,11 +77,14 @@ def simulate_capteur(capteur):
     }
 
     while True:
-        anomaly = random.random() < 0.2  # Moderate anomaly chance
+        anomaly = random.random() < 0.2 or capteur["device_id"] == "raspi_007" or capteur["device_id"] == "raspi_004" # Moderate anomaly chance
         system_data = generate_system_data(capteur["device_id"], ip, capteur["username"], anomaly)
 
         try:
-            r = requests.post(API_SYSTEM_URL, json=system_data, headers=headers, verify=CERT_PATH, timeout=5)
+            if anomaly and (capteur["device_id"] == "raspi_007" or capteur["device_id"] == "raspi_004"):
+                r = requests.post(API_URL + "dashboard/system", json=system_data, headers=headers, verify=CERT_PATH, timeout=5)
+            else:
+                r = requests.post(API_SYSTEM_URL, json=system_data, headers=headers, verify=CERT_PATH, timeout=5)
             print(f"[{capteur['device_id']}] SYSTEM → {r.status_code} | Endpoint: {system_data['sensor_type']}")
 
             if r.status_code in [401, 403, 500]:

@@ -17,6 +17,7 @@ def build_context_from_logs(log_group):
         action = log.get("action", "unknown_action")
         rate = log.get("rate", "?/min")
         user_agent = log.get("user_agent", "unknown")
+        log_warn = log.get("log_warn","")
 
         # Only keep the hour of timestamp
         timestamp = timestamp.split(" ")[1] if timestamp else "unknown_time"
@@ -74,6 +75,9 @@ def build_context_from_logs(log_group):
             else:
                 sentence += f"Request rate is normal ({rate})."
         
+        if log_warn:
+            sentence += f"This log was as warning."
+
         context.append(sentence)
 
     return " ".join(context)
@@ -124,6 +128,8 @@ def parse_last_logs_from_raw_file(log_source, block_size=10):
             rate_match = re.search(r"\[Request rate:\s*([^\]]+)\]", line)
             request_rate = rate_match.group(1) if rate_match else "0/min"
 
+            log_warn = "WARNING" in line
+
             alert = "Alert" if "Alert" in line else ""
             detection = ""
             if "Login Failed" in line:
@@ -146,6 +152,7 @@ def parse_last_logs_from_raw_file(log_source, block_size=10):
                 "status_tag": alert,
                 "user_agent": user_agent,
                 "detection": detection,
+                "warn": log_warn,
                 "action": action,
                 "rate": request_rate
             })

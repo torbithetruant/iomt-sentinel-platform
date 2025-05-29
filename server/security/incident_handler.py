@@ -63,7 +63,7 @@ def calculate_trust_score(data: TrustUpdateRequest) -> float:
     score = 1.0
 
     # Impact progressif des anomalies (logarithmique)
-    anomaly_factor = min(0.6, 0.2 * math.log1p(data.num_anomalies_last_hour))  # max 0.7 penalty
+    anomaly_factor = min(0.7, 0.2 * math.log1p(data.num_anomalies_last_hour))  # max 0.7 penalty
     score -= anomaly_factor
 
     # IP Drift : plus d'IPs = plus risqué, mais atténué

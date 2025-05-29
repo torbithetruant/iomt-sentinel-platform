@@ -14,7 +14,7 @@ CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 # === SIMULATION PARAMS ===
-CAPTEURS = [{"username": "patient_003", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 4)]
+CAPTEURS = [{"username": "patient_003", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 10)]
 
 PATIENT_PROFILES = [
     {"type": "sportif", "base_hr": 60, "base_spo2": 98, "base_temp": 36.3, "risk": 0.05},
@@ -143,7 +143,7 @@ def simulate_capteur(capteur):
     }
 
     while True:
-        anomaly = random.random() < 0.2  # Moderate anomalies (20%)
+        anomaly = random.random() < 0.2 # Moderate anomalies (20%)
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly, profile)
         system_data = generate_system_data(capteur["device_id"], ip, capteur["username"], anomaly)
 
