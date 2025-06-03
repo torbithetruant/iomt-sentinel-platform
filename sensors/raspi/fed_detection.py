@@ -25,13 +25,21 @@ PRIVATE_KEY_PATH = "private_key.pem"
 with open(PRIVATE_KEY_PATH, "rb") as f:
     PRIVATE_KEY = RSA.import_key(f.read())
 
-# === Hash + Signature des gradients ===
-def sign_gradients(gradients, private_key):
+# === Hash + Signature des gradients + ZKP ===
+def sign_gradients_and_zkp(gradients, private_key):
     g_bytes = json.dumps(gradients).encode()
     g_hash = hashlib.sha256(g_bytes).digest()
+    hash_hex = g_hash.hex()
+    
     h = SHA256.new(g_hash)
-    signature = pkcs1_15.new(private_key).sign(h)
-    return signature.hex()
+    signature = pkcs1_15.new(private_key).sign(h).hex()
+    
+    # ZKP simplifié : challenge aléatoire + signature
+    challenge = str(np.random.randint(100000, 999999))
+    zkp_proof = hashlib.sha256((hash_hex + challenge).encode()).hexdigest()
+    
+    return hash_hex, signature, zkp_proof, challenge
+
 
 # === Federated Learning Loop ===
 def fl_loop(device_id, token):
@@ -51,14 +59,17 @@ def fl_loop(device_id, token):
 
             # Signature des gradients
             flat_weights = np.concatenate([w.flatten() for w in model.get_weights()]).tolist()
-            signature = sign_gradients(flat_weights, PRIVATE_KEY)
+            hash_grad, signature, zkp_proof, challenge = sign_gradients_and_zkp(flat_weights, PRIVATE_KEY)
 
             payload = {
                 "device_id": device_id,
                 "gradients": flat_weights,
-                "signature": signature
+                "hash_gradients": hash_grad,
+                "signature": signature,
+                "zkp_proof": zkp_proof,
+                "challenge": challenge
             }
             requests.post(f"{SERVER_URL}/api/fl-update", json=payload, headers={"Authorization": f"Bearer {token}"}, verify=False)
-            print("[FL] Update envoyé au serveur avec signature")
+            print("[FL] Update envoyé au serveur avec signature et ZKP")
 
         time.sleep(600)  # 10 min

@@ -10,8 +10,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 import numpy as np
 import glob
+import hashlib
 
 # === Third-Party Libraries ===
+
+from Crypto.Signature import pkcs1_15
+from Crypto.PublicKey import RSA
+from Crypto.Hash import SHA256
 
 ## FastAPI & Starlette
 from fastapi import FastAPI, Depends, Request, Form, APIRouter
@@ -59,7 +64,6 @@ from security.incident_handler import incident_responder, monitor_logs_with_llm,
 import security.anomaly_state
 
 
-
 # Change with your Keycloak public key
 KEYCLOAK_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA69YwDPnk80OzGdp2doWI+2S0XYrmF4kkekFounifw+2h6lTNqEsGSwT8NCaAI3N/rcHxTQb17QAL3xrRdXdQiBGJmJypsl3wn+ryZCElG9i3mnRsr5R6GgNiqkf4jDDaA5leQ1wQPOl12hJTjj58X3g9ZmPVbV7PH16pCOYwhRJgs2mnCm0UajtNr4Kwzq5KhLlItE1oeQ6DvXfTEL7aEeLqW+Mx1BuQ3NPn9l9nXHs6ii3PLKyXBxcTsIEdCVKiADDRBxSsRxSPwKxgS6AflTSDwN+/Up7wS//UUqEb03xm0xiWuIF6T3tloyssx71JXijHOPG/q2KdhnqNBcy7TQIDAQAB-----END PUBLIC KEY-----
 """
@@ -76,6 +80,11 @@ CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 LOG_PATH = "logs/server.log"
+
+DEVICE_KEYS = {
+    "raspi_001": RSA.import_key(open("raspi_001_pub.pem").read()),
+    "raspi_002": RSA.import_key(open("raspi_002_pub.pem").read()),
+}
 
 
 #############################
@@ -372,19 +381,52 @@ async def check_for_request(
 
 @app.post("/api/fl-update")
 async def receive_fl_update(data: FLUpdate, db: AsyncSession = Depends(get_db)):
-    # Vérification basique : signature/zkp (ajoute la logique plus tard)
-    logger.info(f"FL Update received from {data.device_id} | Gradients: {len(data.gradients)}")
+    try:
+        # Recalculer le hash des gradients
+        gradients_bytes = json.dumps(data.gradients).encode()
+        hash_calc = hashlib.sha256(gradients_bytes).digest()
+        hash_calc_hex = hash_calc.hex()
 
-    # Stocker les gradients dans un buffer global (ou base de données temporaire)
-    with open(f"fl_gradients_{data.device_id}.json", "w") as f:
-        json.dump(data.dict(), f)
+        if hash_calc_hex != data.hash_gradients:
+            logger.warning(f"[ZKP FAIL] Hash mismatch for {data.device_id}")
+            return {"status": "error", "message": "Hash mismatch"}
 
-    # Option : Mettre à jour le Trust Score en fonction de la qualité des gradients (vérif ZKP)
-    return {"status": "gradients received"}
+        # Vérifier la signature RSA
+        pub_key = DEVICE_KEYS.get(data.device_id)
+        if not pub_key:
+            logger.warning(f"[ZKP FAIL] Unknown device {data.device_id}")
+            return {"status": "error", "message": "Unknown device"}
+
+        verifier = pkcs1_15.new(pub_key)
+        try:
+            h = SHA256.new(bytes.fromhex(data.hash_gradients))
+            verifier.verify(h, bytes.fromhex(data.signature))
+        except (ValueError, TypeError):
+            logger.warning(f"[ZKP FAIL] Signature invalid for {data.device_id}")
+            return {"status": "error", "message": "Invalid signature"}
+
+        # Vérifier le ZKP (challenge)
+        zkp_check = hashlib.sha256((data.hash_gradients + data.challenge).encode()).hexdigest()
+        if zkp_check != data.zkp_proof:
+            logger.warning(f"[ZKP FAIL] Proof invalid for {data.device_id}")
+            return {"status": "error", "message": "Invalid ZKP proof"}
+
+        logger.info(f"✅ ZKP verification passed for {data.device_id}")
+
+        # Stocker les gradients (ou traiter)
+        with open(f"fl_gradients_{data.device_id}.json", "w") as f:
+            json.dump(data.dict(), f)
+
+        # ➡️ Option : Mettre à jour le Trust Score ici si besoin
+
+        return {"status": "gradients received and verified"}
+
+    except Exception as e:
+        logger.error(f"[ZKP FAIL] Unexpected error for {data.device_id} | {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.get("/api/fl-model")
 async def get_fl_model():
-    # Lire le modèle global depuis un fichier (ou Redis, DB)
     with open("fl_global_model.json", "r") as f:
         model_data = json.load(f)
     return model_data
