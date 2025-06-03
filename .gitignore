@@ -1,7 +1,7 @@
 # LLM
-llmserver/llm/*
+llm_server/llm/*
 
-llmserver/__pycache__/
+llm_server/__pycache__/
 
 # Ignorer les certificats TLS/SSL
 server/certs/
