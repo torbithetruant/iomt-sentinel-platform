@@ -1,7 +1,7 @@
 # LLM
-llm_server/llm/*
-
 llm_server/__pycache__/
+
+llm_server/llm/bert-supervisor/
 
 # Ignorer les certificats TLS/SSL
 server/certs/
