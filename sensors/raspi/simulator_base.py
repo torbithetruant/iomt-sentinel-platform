@@ -2,8 +2,10 @@ import json
 import random
 import time
 import requests
+import numpy as np
 from datetime import datetime
 import ipaddress
+import fed_detection
 
 # === Lecture de la configuration ===
 with open("config.json") as f:
@@ -76,15 +78,51 @@ def generate_data(ip, anomaly=False):
     }
 
     if anomaly:
-        sensor_data["heart_rate"] = random.randint(110, 150)
-        sensor_data["spo2"] = round(random.uniform(90.0, 94.5), 1)
-        sensor_data["ecg_summary"] = "Anomalous pattern"
+        anomaly_types = ["tachy", "hypoxie", "hyperBP", "hypoBP", "glycémie", "resp"]
+        selected = random.sample(anomaly_types, k=random.randint(1, 2))
         sensor_data["label"] = 1
 
-        system_data["checksum_valid"] = False
-        system_data["disk_free_percent"] = round(random.uniform(5.0, 10.0), 1)
-        system_data["status"] = 0
-        system_data["update_required"] = True
+        if "tachy" in selected:
+            sensor_data["heart_rate"] = random.randint(110, 150)
+            if random.random() < 0.5:
+                sensor_data["ecg_summary"] = "Anomalous pattern"
+
+        if "hypoxie" in selected:
+            sensor_data["spo2"] = round(random.uniform(90.0, 94.5), 1)
+
+        if "hyperBP" in selected:
+            sensor_data["systolic_bp"] = random.randint(140, 160)
+            sensor_data["diastolic_bp"] = random.randint(90, 100)
+
+        if "hypoBP" in selected:
+            sensor_data["systolic_bp"] = random.randint(90, 105)
+            sensor_data["diastolic_bp"] = random.randint(60, 70)
+
+        if "glycémie" in selected:
+            sensor_data["glucose_level"] = round(random.uniform(7.5, 10.5), 1)
+
+        if "resp" in selected:
+            sensor_data["respiration_rate"] = random.randint(22, 28)
+
+        # Faux positifs ECG
+        if sensor_data["ecg_summary"] == "Normal sinus rhythm" and random.random() < 0.1:
+            sensor_data["ecg_summary"] = "Anomalous pattern"
+
+        features = ["checksum", "disk", "status", "update"]
+        selected = random.sample(features, k=random.randint(1, 2))
+
+        if "checksum" in selected:
+            system_data["checksum_valid"] = False
+
+        if "disk" in selected:
+            system_data["disk_free_percent"] = round(random.uniform(4.0, 9.9), 1)
+
+        if "status" in selected:
+            # 50% chance d’être en erreur (0), sinon inactif (2)
+            system_data["status"] = 0 if random.random() < 0.5 else 2
+
+        if "update" in selected:
+            system_data["update_required"] = True
 
     return sensor_data, system_data
 
@@ -101,8 +139,23 @@ def simulate():
     }
 
     while True:
-        anomaly = random.random() < 0.01
+        anomaly = random.random() < 0.01  # Probabilité d'anomalie simulée
         sensor_data, system_data = generate_data(ip, anomaly)
+
+        # === Détection autoencoder ===
+        features = np.array([[sensor_data['heart_rate'], sensor_data['spo2'], sensor_data['temperature'],
+                              sensor_data['systolic_bp'], sensor_data['diastolic_bp'],
+                              sensor_data['glucose_level'], sensor_data['respiration_rate']]])
+        features_scaled = fed_detection.scaler.transform(features)
+        reconstruction = fed_detection.model.predict(features_scaled)
+        score = np.mean((features_scaled - reconstruction)**2)
+
+        print(f"[Detection] MSE = {score:.5f}")
+        if score > fed_detection.ANOMALY_THRESHOLD:
+            print(f"[Anomaly] Autoencoder detected anomaly: {score:.5f}")
+            sensor_data["label"] = 1  # Ajouter le flag d’anomalie dans le payload
+        else:
+            sensor_data["label"] = 0
 
         try:
             r1 = requests.post(API_SENSOR_URL, json=sensor_data, headers=headers, verify=CERT_PATH, timeout=5)
@@ -119,6 +172,3 @@ def simulate():
             print(f"❌ Network error: {e}")
 
         time.sleep(20)
-
-if __name__ == "__main__":
-    simulate()

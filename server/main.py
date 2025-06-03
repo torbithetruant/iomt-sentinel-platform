@@ -7,12 +7,14 @@ import requests
 import math
 import httpx
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, List
+import numpy as np
+import glob
 
 # === Third-Party Libraries ===
 
 ## FastAPI & Starlette
-from fastapi import FastAPI, Depends, Request, Form
+from fastapi import FastAPI, Depends, Request, Form, APIRouter
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import HTTPException
@@ -207,6 +209,12 @@ class UserAccountData(BaseModel):
     email: str
     role: str
 
+class FLUpdate(BaseModel):
+    device_id: str
+    gradients: List[float]
+    zkp_proof: str  # Optionnel : preuve ZKP sur les gradients
+    signature: str   # Signature RSA du hash des gradients
+
 async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         yield session
@@ -362,8 +370,28 @@ async def check_for_request(
     logger.debug(f"System request : [{device_id}], [GET], [/api/system-request], [NONE]")
     return {"request": False}
 
+@app.post("/api/fl-update")
+async def receive_fl_update(data: FLUpdate, db: AsyncSession = Depends(get_db)):
+    # Vérification basique : signature/zkp (ajoute la logique plus tard)
+    logger.info(f"FL Update received from {data.device_id} | Gradients: {len(data.gradients)}")
+
+    # Stocker les gradients dans un buffer global (ou base de données temporaire)
+    with open(f"fl_gradients_{data.device_id}.json", "w") as f:
+        json.dump(data.dict(), f)
+
+    # Option : Mettre à jour le Trust Score en fonction de la qualité des gradients (vérif ZKP)
+    return {"status": "gradients received"}
+
+@app.get("/api/fl-model")
+async def get_fl_model():
+    # Lire le modèle global depuis un fichier (ou Redis, DB)
+    with open("fl_global_model.json", "r") as f:
+        model_data = json.load(f)
+    return model_data
+
+
 ##############################
-# SCORING
+# SCORING & FED LEARNING
 ##############################
 
 # Trust Score Dashboard
@@ -388,6 +416,26 @@ async def trust_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "request": request,
         "trust_records": trust_records
     })
+
+async def aggregate_fl_models():
+    while True:
+        gradient_files = glob.glob("fl_gradients_*.json")
+        all_gradients = []
+        for file in gradient_files:
+            with open(file, "r") as f:
+                data = json.load(f)
+                all_gradients.append(data["gradients"])
+            os.remove(file)  # Supprimer après agrégation
+
+        if all_gradients:
+            # FedAvg
+            gradients = np.mean(np.array(all_gradients), axis=0)
+            model_data = {"weights": gradients.tolist(), "timestamp": datetime.now().isoformat()}
+            with open("fl_global_model.json", "w") as f:
+                json.dump(model_data, f)
+            logger.info(f"Aggregated FL model updated with {len(all_gradients)} clients.")
+
+        await asyncio.sleep(600)  # 10 minutes
 
 ##############################
 # AUTHENTICATION
