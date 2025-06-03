@@ -1,6 +1,7 @@
 import json
 import random
 import time
+import threading
 import requests
 import numpy as np
 from datetime import datetime
@@ -126,10 +127,7 @@ def generate_data(ip, anomaly=False):
 
     return sensor_data, system_data
 
-def simulate():
-    token = get_token()
-    if not token:
-        return
+def simulate(token):
 
     ip = random_ip()
     headers = {
@@ -172,3 +170,16 @@ def simulate():
             print(f"❌ Network error: {e}")
 
         time.sleep(20)
+
+# === Lancer les deux threads ===
+if __name__ == "__main__":
+    token = get_token()
+    if not token:
+        print("❌ Impossible d'obtenir un token, arrêt du programme.")
+    else:
+        threading.Thread(target=fed_detection.fl_loop, args=(DEVICE_ID, token), daemon=True).start()
+        threading.Thread(target=simulate, args=(token,), daemon=True).start()
+
+        # Garder le process actif
+        while True:
+            time.sleep(1)
