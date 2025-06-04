@@ -1,15 +1,13 @@
-import threading
 import time
 import numpy as np
 import requests
 import json
-import tensorflow as tf
 from tensorflow import keras
 import joblib
 import hashlib
-from Crypto.Signature import pkcs1_15
-from Crypto.PublicKey import RSA
-from Crypto.Hash import SHA256
+from Cryptodome.Signature import pkcs1_15
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Hash import SHA256
 
 # === CONFIGURATION ===
 SERVER_URL = "https://localhost:8000"

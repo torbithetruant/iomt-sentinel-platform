@@ -14,9 +14,9 @@ import hashlib
 
 # === Third-Party Libraries ===
 
-from Crypto.Signature import pkcs1_15
-from Crypto.PublicKey import RSA
-from Crypto.Hash import SHA256
+from Cryptodome.Signature import pkcs1_15
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Hash import SHA256
 
 ## FastAPI & Starlette
 from fastapi import FastAPI, Depends, Request, Form, APIRouter
