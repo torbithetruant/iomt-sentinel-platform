@@ -151,8 +151,12 @@ def simulate(token):
         print(f"[Detection] MSE = {score:.5f}")
         if score > fed_detection.ANOMALY_THRESHOLD:
             print(f"[Anomaly] Autoencoder detected anomaly: {score:.5f}")
+            if not sensor_data["label"]:
+                print("Faux Négatif")
             sensor_data["label"] = 1  # Ajouter le flag d’anomalie dans le payload
         else:
+            if sensor_data["label"]:
+                print("Faux Positif")
             sensor_data["label"] = 0
 
         try:

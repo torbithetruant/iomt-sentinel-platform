@@ -12,3 +12,6 @@ python-multipart
 asyncpg
 geoip2
 pycryptodomex
+tensorflow
+joblib
+scikit-learn

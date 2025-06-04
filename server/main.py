@@ -82,8 +82,8 @@ CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 LOG_PATH = "logs/server.log"
 
 DEVICE_KEYS = {
-    "raspi_001": RSA.import_key(open("raspi_001_pub.pem").read()),
-    "raspi_002": RSA.import_key(open("raspi_002_pub.pem").read()),
+    "raspi_001": RSA.import_key(open("certs/raspi_001_pub.pem").read()),
+    # "raspi_002": RSA.import_key(open("raspi_002_pub.pem").read()),
 }
 
 
@@ -414,7 +414,7 @@ async def receive_fl_update(data: FLUpdate, db: AsyncSession = Depends(get_db)):
         logger.info(f"✅ ZKP verification passed for {data.device_id}")
 
         # Stocker les gradients (ou traiter)
-        with open(f"fl_gradients_{data.device_id}.json", "w") as f:
+        with open(f"security/fed_learning/fl_gradients_{data.device_id}.json", "w") as f:
             json.dump(data.dict(), f)
 
         # ➡️ Option : Mettre à jour le Trust Score ici si besoin
@@ -427,7 +427,7 @@ async def receive_fl_update(data: FLUpdate, db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/fl-model")
 async def get_fl_model():
-    with open("fl_global_model.json", "r") as f:
+    with open("security/fed_learning/fl_global_model.json", "r") as f:
         model_data = json.load(f)
     return model_data
 
@@ -461,7 +461,7 @@ async def trust_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 
 async def aggregate_fl_models():
     while True:
-        gradient_files = glob.glob("fl_gradients_*.json")
+        gradient_files = glob.glob("security/fed_learning/fl_gradients_*.json")
         all_gradients = []
         for file in gradient_files:
             with open(file, "r") as f:
@@ -473,7 +473,7 @@ async def aggregate_fl_models():
             # FedAvg
             gradients = np.mean(np.array(all_gradients), axis=0)
             model_data = {"weights": gradients.tolist(), "timestamp": datetime.now().isoformat()}
-            with open("fl_global_model.json", "w") as f:
+            with open("security/fed_learning/fl_global_model.json", "w") as f:
                 json.dump(model_data, f)
             logger.info(f"Aggregated FL model updated with {len(all_gradients)} clients.")
 

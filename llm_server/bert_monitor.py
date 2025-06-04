@@ -42,6 +42,8 @@ async def infer(request: ContextRequest):
         pred = torch.argmax(probs, dim=1).item()
         score = probs[0, 1].item()
     
+    monitor_resources()
+
     return {
         "prediction": pred,
         "score": score

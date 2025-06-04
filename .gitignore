@@ -29,3 +29,5 @@ server/data.db
 
 # Copyright
 server/database/GeoLite2-City.mmdb
+
+sensors/raspi/__pycache__
