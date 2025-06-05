@@ -73,5 +73,8 @@ def fl_loop(device_id, token):
             }
             requests.post(f"{SERVER_URL}/api/fl-update", json=payload, headers={"Authorization": f"Bearer {token}"}, verify=False)
             print("[FL] Update envoyé au serveur avec signature et ZKP")
+            
+            grad_size = len(json.dumps(flat_weights).encode())
+            print(f"[FL] Gradient payload size: {grad_size} bytes")
 
         time.sleep(600)  # 10 min

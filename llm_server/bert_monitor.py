@@ -21,13 +21,6 @@ app = FastAPI()
 class ContextRequest(BaseModel):
     context: str
 
-def monitor_resources():
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    print(f"🧠 Memory: {mem_info.rss / (1024*1024):.2f} MB")
-    print(f"⚙️ CPU: {process.cpu_percent()}%")
-
-
 # === Inference Endpoint ===
 @app.post("/infer")
 async def infer(request: ContextRequest):
@@ -41,8 +34,6 @@ async def infer(request: ContextRequest):
         probs = torch.softmax(outputs.logits, dim=1)
         pred = torch.argmax(probs, dim=1).item()
         score = probs[0, 1].item()
-    
-    monitor_resources()
 
     return {
         "prediction": pred,

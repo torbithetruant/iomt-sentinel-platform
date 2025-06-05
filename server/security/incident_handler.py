@@ -107,7 +107,8 @@ async def update_trust_score_for_device(device_id: str, db_session: AsyncSession
     new_score = calculate_trust_score(features)
 
     if new_score < THRESHOLD_REVOKE:
-        print(f"🚨 Low trust score ({new_score:.2f}) for {device_id} - taking actions!")
+        t_response = datetime.now().timestamp() # When countermeasure was triggered
+        logger.info(f"[Response Time] : {t_response}")
         if username != "unknown_user":
             # await revoke_user_token(username)
             print("Account disabled !")
@@ -139,6 +140,8 @@ async def update_trust_score_for_device(device_id: str, db_session: AsyncSession
     logger.info(f"⏱️ Trust Score Update Time for {device_id}: {duration:.3f} sec")
 
 async def detect_anomalies_remotely(context: str):
+    context_size = len(context.encode())  # in bytes
+    logger.info(f"[LLM] Context size: {context_size} bytes")
     start_time = time.monotonic()
     try:
         async with httpx.AsyncClient() as client:
@@ -193,9 +196,10 @@ async def monitor_logs_with_llm(log_path="server.log", chunk_size=10, delay=5):
                 pred, score = await detect_anomalies_remotely(extended_context)
 
                 if pred == 1:
+                    t_detect = datetime.now().timestamp()   # When detected (can be the same for local AE)
+                    logger.info(f"🚨 Anomaly detected! Score: {score:.2f}, [Detection Time] : {t_detect}")
                     detection_id = str(uuid.uuid4())  # Unique ID per detection
                     anomaly_timestamps[detection_id] = time.monotonic()
-                    logger.info(f"🚨 Anomaly detected! Score: {score:.2f}")
                     await incident_queue.put((extended_context, score, detection_id))
 
             await asyncio.sleep(delay)

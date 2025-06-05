@@ -7,6 +7,7 @@ import numpy as np
 from datetime import datetime
 import ipaddress
 import fed_detection
+import psutil
 
 # === Lecture de la configuration ===
 with open("config.json") as f:
@@ -152,9 +153,14 @@ def simulate(token):
         features = np.array([[sensor_data['heart_rate'], sensor_data['spo2'], sensor_data['temperature'],
                               sensor_data['systolic_bp'], sensor_data['diastolic_bp'],
                               sensor_data['glucose_level'], sensor_data['respiration_rate']]])
+        
+        start = time.time()
         features_scaled = fed_detection.scaler.transform(features)
         reconstruction = fed_detection.model.predict(features_scaled)
         score = np.mean((features_scaled - reconstruction) ** 2)
+        latency_local = time.time() - start
+
+        print(f"[Latency] Local AE inference time: {latency_local*1000:.2f} ms")
 
         detected = score > fed_detection.ANOMALY_THRESHOLD
         real_label = sensor_data["label"]
@@ -195,6 +201,10 @@ def simulate(token):
             recall = metrics['TP'] / (metrics['TP'] + metrics['FN'] + 1e-8)
             f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
             print(f"Precision: {precision:.2f} | Recall: {recall:.2f} | F1: {f1:.2f}\n")
+        
+        cpu = psutil.cpu_percent(interval=1)
+        mem = psutil.virtual_memory().used / (1024*1024)
+        print(f"[Energy Proxy] CPU: {cpu}% | Memory: {mem:.2f} MB")
 
         time.sleep(10)
 
