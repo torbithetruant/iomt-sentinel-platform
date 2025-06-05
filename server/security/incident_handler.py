@@ -10,6 +10,8 @@ from sqlalchemy import select, update
 from datetime import datetime, timezone
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from collections import defaultdict
+
 import security.anomaly_state
 from database.models import AsyncSessionLocal, DeviceTrust
 from security.anomaly_state import get_user_from_device, get_full_anomaly_metrics
@@ -18,6 +20,7 @@ from security.log_utils import parse_last_logs_from_raw_file, build_context_from
 last_inode = None
 file_offset = 0
 last_line_number = 0
+llm_metrics = defaultdict(int)  # llm_metrics["TP"], llm_metrics["FP"]
 
 logger = logging.getLogger("detection")
 
@@ -39,8 +42,10 @@ THRESHOLD_IPS = 3
 class TrustUpdateRequest(BaseModel):
     device_id: str
     num_anomalies_last_hour: int = 0
+    fed_ano_detected: int = 0
     failed_auth_ratio: float = 0.0       # between 0 and 1
     ip_drift_score: float = 0.0          # between 0 and 1
+    device_drift_score: float = 0.0
     endpoint_unusual: bool = False
     system_alert: bool = False           # ex: checksum error or disk alert
 
@@ -66,11 +71,14 @@ def calculate_trust_score(data: TrustUpdateRequest) -> float:
     anomaly_factor = min(0.7, 0.2 * math.log1p(data.num_anomalies_last_hour)) if data.num_anomalies_last_hour != 0 else 0  # max 0.7 penalty
     score -= anomaly_factor
 
+    # Anomalies détectées par le capteur
+    score -= 0.1 * data.fed_ano_detected
+
     # IP Drift : plus d'IPs = plus risqué, mais atténué
-    score -= 0.2 * data.ip_drift_score
+    score -= 0.1 * data.ip_drift_score
 
     # Device Drift : idem, si on le souhaite
-    # score -= 0.1 * data.device_drift_score
+    score -= 0.1 * data.device_drift_score
 
     # Failed Auth Ratio : atténué aussi
     score -= 0.15 * data.failed_auth_ratio
@@ -79,11 +87,6 @@ def calculate_trust_score(data: TrustUpdateRequest) -> float:
     if data.endpoint_unusual:
         score -= 0.1
 
-    # System alert : binaire, mais moins lourd
-    if data.system_alert:
-        score -= 0.05
-
-    # Clamp
     return max(0.0, min(1.0, score))  # Ne jamais descendre en dessous de 0.2
 
 async def update_trust_score_for_device(device_id: str, db_session: AsyncSession):
@@ -94,8 +97,10 @@ async def update_trust_score_for_device(device_id: str, db_session: AsyncSession
     features = TrustUpdateRequest(
         device_id=device_id,
         num_anomalies_last_hour=metrics["num_anomalies_last_hour"],
+        fed_ano_detected=metrics["fed_ano_detected"],
         failed_auth_ratio=metrics["failed_auth_ratio"],
         ip_drift_score=metrics["ip_drift_score"],
+        device_drift_score=metrics["device_drift_score"],
         endpoint_unusual=metrics["endpoint_unusual"],
         system_alert=metrics["system_alert"]
     )
@@ -263,7 +268,6 @@ async def handle_detected_threat(context, score, detection_id, db):
         logger.info(f"⏳ Time from Detection to Handling: {detection_latency:.3f} sec")
     else:
         detection_latency = None
-        print("⚠️ Detection timestamp not found!")
 
     results = extract_anomaly_causes(context)
 
@@ -281,13 +285,13 @@ async def handle_detected_threat(context, score, detection_id, db):
         print(f"Location: {metadata['location']}")
         print("-" * 80)
 
-        print(f"Il y a {len(causes)} causes !")
         if len(causes) == 0:
-            # print("⚠️ No specific causes detected, skipping anomaly registration.")
+            llm_metrics["FP"] += 1
             continue
+        else:
+            llm_metrics["TP"] += 1
 
         if metadata['device'] == "unknown_device":
-            # print("⚠️ Device is unknown, skipping further actions.")
             continue
 
         # Enregistrement uniquement si causes détectées
@@ -302,6 +306,11 @@ async def handle_detected_threat(context, score, detection_id, db):
 
     duration = time.monotonic() - start_time
     logger.info(f"⏱️ Total Threat Handling Time: {duration:.3f} sec")
+
+    total = llm_metrics["TP"] + llm_metrics["FP"]
+    if total > 0 and total % 10 == 0:
+        precision = llm_metrics["TP"] / (llm_metrics["TP"] + llm_metrics["FP"] + 1e-8)
+        logger.info(f"📊 LLM Metrics — TP: {llm_metrics['TP']} | FP: {llm_metrics['FP']} | Precision: {precision:.2f}")
 
         
 

@@ -13,6 +13,7 @@ device_to_ips = defaultdict(set)
 
 user_device_ip_history = defaultdict(list)
 anomaly_count_last_hour = defaultdict(list)
+fed_anomaly_last_hour = defaultdict(list)
 
 ip_denylist = set()
 
@@ -32,6 +33,12 @@ def register_anomaly_event(device_id, username, ip, location):
     """
     Met à jour les états pour un événement d'anomalie.
     """
+
+    # Spécifique pour les anomalies médicales
+    if ip == "" or location == "":
+        fed_anomaly_last_hour[device_id].append(time.time())
+        return
+
     now = datetime.now()
 
     user_to_devices[username].add(device_id)
@@ -58,6 +65,18 @@ def get_anomaly_count(device_id, time_window=3600):
     print(f"🔍 Counting anomalies for {device_id}... Found: {len(recent)}")
     return len(recent)
 
+def get_fed_detected(device_id, time_window=3600):
+    """
+    Nombre d'anomalies pour un device dans la dernière 'time_window' (en secondes).
+    """
+    now = time.time()
+    timestamps = fed_anomaly_last_hour.get(device_id, [])
+    recent = [t for t in timestamps if now - t <= time_window]
+    fed_anomaly_last_hour[device_id] = recent  # Nettoyage
+
+    print(f"🔍 Counting anomalies for {device_id}... Found: {len(recent)}")
+    return len(recent)
+
 # === IP Drift : L'utilisateur utilise-t-il plusieurs IPs ? ===
 
 def get_ip_drift_score(username):
@@ -68,7 +87,7 @@ def get_ip_drift_score(username):
 
 def get_device_drift_score(username):
     if username == "unknown_user":
-        return 1.0
+        return 0.0
     device_count = len(user_to_devices.get(username, []))
     return min(1.0, device_count / 5)
 
@@ -89,10 +108,10 @@ def is_endpoint_unusual(context):
 def get_full_anomaly_metrics(device_id, username, context):
     metrics = {
         "num_anomalies_last_hour": get_anomaly_count(device_id),
+        "fed_ano_detected": get_fed_detected(device_id),
         "failed_auth_ratio": 0.0,  # Placeholder si besoin
         "ip_drift_score": get_ip_drift_score(username),
         "device_drift_score": get_device_drift_score(username),
-        "user_drift_score": get_user_drift_score(device_id),
         "endpoint_unusual": is_endpoint_unusual(context),
         "system_alert": "System alert" in context
     }

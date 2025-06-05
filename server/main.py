@@ -60,7 +60,7 @@ from logs.scripts.log_rate_tracker import get_user_action_and_rate
 # Optional future import (commented out)
 # from keycloak_file_monitor import monitor_keycloak_log
 
-from security.incident_handler import incident_responder, monitor_logs_with_llm, revoke_user_token, denylist_ip
+from security.incident_handler import incident_responder, monitor_logs_with_llm, revoke_user_token, denylist_ip, update_trust_score_for_device
 import security.anomaly_state
 
 
@@ -141,9 +141,9 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         # Gestion des logs en fonction du chemin
         if path.startswith("/login") and method == "POST":
             if response.status_code == 302:
-                logger.info(f"{log_prefix} [Login Success] {user_agent}")
+                logger.info(f"{log_prefix} [Login Success] {user_agent} {duration}ms")
             else:
-                logger.warning(f"{log_prefix} [Login Failed] {user_agent}")
+                logger.warning(f"{log_prefix} [Login Failed] {user_agent} {duration}ms")
 
         elif path.startswith("/api/sensor") or path.startswith("/api/system-status"):
             async with AsyncSessionLocal() as session:
@@ -153,17 +153,23 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
                 context = "[Normal Device]" if device_match else "[New Device Used]"
                 label = "[Alert]" if alert == 1 else "[Safe]"
-                log_message = f"{log_prefix} {context} {label} {user_agent}"
+                log_message = f"{log_prefix} {context} {label} {user_agent} {duration}ms"
 
-                if alert == 1:
+                if alert:
                     logger.warning(log_message)
                 else:
                     logger.info(log_message)
 
+        elif path.startswith("/api/fl-update"):
+            if "error" in response.status:
+                logger.warning(f"{log_prefix} [ZKP FAIL] {user_agent} {duration}ms")
+            else:
+                logger.info(f"{log_prefix} [ZKP SUCCESS] {user_agent} {duration}ms")
+
         elif path.startswith("/dashboard"):
             status = "[Dashboard Access]" if response.status_code == 200 else "[Dashboard Access Failed]"
-            logger.info(f"{log_prefix} {status} {user_agent}") if response.status_code == 200 else \
-                logger.warning(f"{log_prefix} {status} {user_agent}")
+            logger.info(f"{log_prefix} {status} {user_agent} {duration}ms") if response.status_code == 200 else \
+                logger.warning(f"{log_prefix} {status} {user_agent} {duration}ms")
 
         else:
             logger.info(f"{log_prefix} {user_agent} {duration}ms")
@@ -221,7 +227,7 @@ class UserAccountData(BaseModel):
 class FLUpdate(BaseModel):
     device_id: str
     gradients: List[float]
-    zkp_proof: str  # Optionnel : preuve ZKP sur les gradients
+    zkp_proof: str  # preuve ZKP sur les gradients
     signature: str   # Signature RSA du hash des gradients
 
 async def get_db() -> AsyncSession:
@@ -253,7 +259,6 @@ def index(request: Request):
         roles = payload.get("realm_access", {}).get("roles", [])
         username = payload.get("preferred_username", "Utilisateur")
     except:
-        logger.warning(f"[{request.client.host}], [{request.headers.get('user-agent')}], [GET], [/], [Invalid Token]")
         return RedirectResponse(url="/login")
 
     return templates.TemplateResponse("index.html", {
@@ -270,6 +275,15 @@ def index(request: Request):
 @app.post("/api/sensor")
 @limiter.limit("10/minute")
 async def receive_sensor_data(request: Request, data: SensorData, user=Depends(require_role("patient")), db: AsyncSession = Depends(get_db)):
+    if data.label:
+        security.anomaly_state.register_anomaly_event(
+            device_id=data.device_id,
+            username=security.anomaly_state.get_user_from_device(data.device_id),
+            ip="",
+            location=""
+        )
+        
+        await update_trust_score_for_device(data.device_id, db)
 
     record = SensorRecord(
         device_id=data.device_id,
@@ -388,13 +402,11 @@ async def receive_fl_update(data: FLUpdate, db: AsyncSession = Depends(get_db)):
         hash_calc_hex = hash_calc.hex()
 
         if hash_calc_hex != data.hash_gradients:
-            logger.warning(f"[ZKP FAIL] Hash mismatch for {data.device_id}")
             return {"status": "error", "message": "Hash mismatch"}
 
         # Vérifier la signature RSA
         pub_key = DEVICE_KEYS.get(data.device_id)
         if not pub_key:
-            logger.warning(f"[ZKP FAIL] Unknown device {data.device_id}")
             return {"status": "error", "message": "Unknown device"}
 
         verifier = pkcs1_15.new(pub_key)
@@ -402,27 +414,20 @@ async def receive_fl_update(data: FLUpdate, db: AsyncSession = Depends(get_db)):
             h = SHA256.new(bytes.fromhex(data.hash_gradients))
             verifier.verify(h, bytes.fromhex(data.signature))
         except (ValueError, TypeError):
-            logger.warning(f"[ZKP FAIL] Signature invalid for {data.device_id}")
             return {"status": "error", "message": "Invalid signature"}
 
         # Vérifier le ZKP (challenge)
         zkp_check = hashlib.sha256((data.hash_gradients + data.challenge).encode()).hexdigest()
         if zkp_check != data.zkp_proof:
-            logger.warning(f"[ZKP FAIL] Proof invalid for {data.device_id}")
             return {"status": "error", "message": "Invalid ZKP proof"}
-
-        logger.info(f"✅ ZKP verification passed for {data.device_id}")
 
         # Stocker les gradients (ou traiter)
         with open(f"security/fed_learning/fl_gradients_{data.device_id}.json", "w") as f:
             json.dump(data.dict(), f)
 
-        # ➡️ Option : Mettre à jour le Trust Score ici si besoin
-
         return {"status": "gradients received and verified"}
 
     except Exception as e:
-        logger.error(f"[ZKP FAIL] Unexpected error for {data.device_id} | {e}")
         return {"status": "error", "message": str(e)}
 
 @app.get("/api/fl-model")

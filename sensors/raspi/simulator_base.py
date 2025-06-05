@@ -21,6 +21,13 @@ CERT_PATH = config["cert_path"]
 CLIENT_ID = config["client_id"]
 CLIENT_SECRET = config["client_secret"]
 
+metrics = {
+    "TP": 0,
+    "FP": 0,
+    "TN": 0,
+    "FN": 0
+}
+
 def random_ip():
     return str(ipaddress.IPv4Address(random.randint(0xC0A80001, 0xC0A8FFFF)))
 
@@ -128,7 +135,6 @@ def generate_data(ip, anomaly=False):
     return sensor_data, system_data
 
 def simulate(token):
-
     ip = random_ip()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -136,44 +142,61 @@ def simulate(token):
         "X-Forwarded-For": ip
     }
 
+    iteration = 0
+
     while True:
-        anomaly = random.random() < 0.01  # Probabilité d'anomalie simulée
+        iteration += 1
+        anomaly = random.random() < 0.01
         sensor_data, system_data = generate_data(ip, anomaly)
 
-        # === Détection autoencoder ===
         features = np.array([[sensor_data['heart_rate'], sensor_data['spo2'], sensor_data['temperature'],
                               sensor_data['systolic_bp'], sensor_data['diastolic_bp'],
                               sensor_data['glucose_level'], sensor_data['respiration_rate']]])
         features_scaled = fed_detection.scaler.transform(features)
         reconstruction = fed_detection.model.predict(features_scaled)
-        score = np.mean((features_scaled - reconstruction)**2)
+        score = np.mean((features_scaled - reconstruction) ** 2)
+
+        detected = score > fed_detection.ANOMALY_THRESHOLD
+        real_label = sensor_data["label"]
+
+        # === Évaluation métriques ===
+        if detected and real_label == 1:
+            metrics["TP"] += 1
+        elif detected and real_label == 0:
+            metrics["FP"] += 1
+        elif not detected and real_label == 0:
+            metrics["TN"] += 1
+        elif not detected and real_label == 1:
+            metrics["FN"] += 1
 
         print(f"[Detection] MSE = {score:.5f}")
-        if score > fed_detection.ANOMALY_THRESHOLD:
+        if detected:
             print(f"[Anomaly] Autoencoder detected anomaly: {score:.5f}")
-            if not sensor_data["label"]:
-                print("Faux Négatif")
-            sensor_data["label"] = 1  # Ajouter le flag d’anomalie dans le payload
-        else:
-            if sensor_data["label"]:
+            if not real_label:
                 print("Faux Positif")
-            sensor_data["label"] = 0
+        else:
+            if real_label:
+                print("Faux Négatif")
+
+        sensor_data["label"] = int(detected)  # Pour envoi vers API
 
         try:
             r1 = requests.post(API_SENSOR_URL, json=sensor_data, headers=headers, verify=CERT_PATH, timeout=5)
             r2 = requests.post(API_SYSTEM_URL, json=system_data, headers=headers, verify=CERT_PATH, timeout=5)
             print(f"[{DEVICE_ID}] SENSOR → {r1.status_code} | SYSTEM → {r2.status_code}")
-
-            if r1.status_code in [401, 403] or r2.status_code in [401, 403]:
-                print(f"🔁 Token expired, refreshing...")
-                token = get_token()
-                if token:
-                    headers["Authorization"] = f"Bearer {token}"
-
         except Exception as e:
             print(f"❌ Network error: {e}")
 
-        time.sleep(20)
+        # Afficher les métriques toutes les 50 itérations
+        if iteration % 50 == 0:
+            print("\n📊 [Métriques]")
+            print(f"TP: {metrics['TP']} | FP: {metrics['FP']} | TN: {metrics['TN']} | FN: {metrics['FN']}")
+            precision = metrics['TP'] / (metrics['TP'] + metrics['FP'] + 1e-8)
+            recall = metrics['TP'] / (metrics['TP'] + metrics['FN'] + 1e-8)
+            f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
+            print(f"Precision: {precision:.2f} | Recall: {recall:.2f} | F1: {f1:.2f}\n")
+
+        time.sleep(10)
 
 # === Lancer les deux threads ===
 if __name__ == "__main__":

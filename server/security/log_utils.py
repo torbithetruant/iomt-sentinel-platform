@@ -50,6 +50,9 @@ def build_context_from_logs(log_group):
                 sentence += "System alert reported. "
             if detection == "Wrong User's Device":
                 sentence += "Device not registered to this user — possible attack. "
+        elif "/api/fl-update" in endpoint:
+            if detection == "ZKP Fail":
+                sentence += "The device is not trusted. "
         elif "/login" in endpoint:
             if detection == "Login Failed":
                 sentence += f"{user} failed to log in — possible brute force. "
@@ -140,6 +143,8 @@ def parse_last_logs_from_raw_file(log_source, block_size=10):
                 detection = "Invalid Token"
             elif "New Device" in line:
                 detection = "Wrong User's Device"
+            elif "ZKP Fail" in line:
+                detection = "ZKP Fail"
 
             block_texts.append({
                 "timestamp": timestamp,
