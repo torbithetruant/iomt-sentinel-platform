@@ -72,7 +72,7 @@ def calculate_trust_score(data: TrustUpdateRequest) -> float:
     score -= anomaly_factor
 
     # Anomalies détectées par le capteur
-    score -= 0.1 * data.fed_ano_detected
+    score -= 0.05 * data.fed_ano_detected
 
     # IP Drift : plus d'IPs = plus risqué, mais atténué
     score -= 0.1 * data.ip_drift_score

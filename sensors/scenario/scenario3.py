@@ -4,12 +4,13 @@ import time
 import requests
 from datetime import datetime
 import ipaddress
+import psutil
 
 # === CONFIGURATION GLOBALE ===
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 API_SENSOR_URL = "https://localhost:8000/api/sensor"
 API_SYSTEM_URL = "https://localhost:8000/api/system-status"
-CERT_PATH = "../../server/certs/cert.pem"
+CERT_PATH = "../raspi/cert.pem"
 CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
@@ -54,7 +55,6 @@ def generate_sensor_data(device_id, anomaly=False):
         "label": 0
     }
     if anomaly:
-        data["label"] = 1
         data["heart_rate"] = random.randint(110, 150)
         data["spo2"] = round(random.uniform(88, 94), 1)
         data["ecg_summary"] = "Anomalous pattern"
@@ -96,10 +96,10 @@ def simulate_capteur(capteur, is_target=False):
     while True:
         if is_target:
             anomaly = random.random() < 0.8  # 80% anomalies for target device
-            sleep_time = random.uniform(2, 5)  # Faster loop = DoS effect
+            sleep_time = random.uniform(10, 15)  # Faster loop = DoS effect
         else:
             anomaly = random.random() < 0.01  # 1% anomalies for normal devices
-            sleep_time = random.uniform(10, 12)
+            sleep_time = random.uniform(15, 20)
 
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly)
         system_data = generate_system_data(capteur["device_id"], headers["X-Forwarded-For"], capteur["username"], anomaly)
@@ -118,6 +118,10 @@ def simulate_capteur(capteur, is_target=False):
 
         except Exception as e:
             print(f"❌ Network error for {capteur['device_id']}: {e}")
+
+        cpu = psutil.cpu_percent(interval=1)
+        mem = psutil.virtual_memory().used / (1024*1024)
+        print(f"[{capteur['device_id']}] 🧠 CPU: {cpu}% | MEM: {mem:.2f} MB")
 
         time.sleep(sleep_time)
 

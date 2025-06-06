@@ -4,16 +4,17 @@ import time
 import requests
 from datetime import datetime
 import ipaddress
+import psutil
 
 # === CONFIGURATION ===
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 API_SENSOR_URL = "https://localhost:8000/api/sensor"
 API_SYSTEM_URL = "https://localhost:8000/api/system-status"
-CERT_PATH = "../../server/certs/cert.pem"
+CERT_PATH = "../raspi/cert.pem"
 CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
-CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 10)]
+CAPTEURS = [{"username": f"patient_{str(i).zfill(3)}", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 7)]
 
 PATIENT_PROFILES = [
     {"type": "sportif", "base_hr": 60, "base_spo2": 98, "base_temp": 36.3, "risk": 0.05},
@@ -23,6 +24,9 @@ PATIENT_PROFILES = [
 ]
 
 def random_ip():
+    return str(ipaddress.IPv4Address(random.randint(0xC0A80001, 0xC0A8FFFF)))  # 192.168.0.x
+
+def random_ip_public():
     return str(ipaddress.IPv4Address(random.randint(0x0B000001, 0xDF0000FF)))  # Random public IP range
 
 def get_token(username, password="test123"):
@@ -64,7 +68,6 @@ def generate_sensor_data(device_id, anomaly=False, profile=None):
     if anomaly:
         anomaly_types = ["tachy", "hypoxie", "hyperBP", "hypoBP", "glycémie", "resp"]
         selected = random.sample(anomaly_types, k=random.randint(1, 2))
-        data["label"] = 1
 
         if "tachy" in selected:
             data["heart_rate"] = random.randint(110, 150)
@@ -119,9 +122,14 @@ def simulate_device_botnet(capteur):
         "Content-Type": "application/json"
     }
 
+    ip = random_ip()
+
     while True:
-        anomaly = random.random() < 0.2  # Moderate anomaly rate
-        ip = random_ip()  # Change IP for each request
+        if capteur["device_id"] == "raspi_002" or capteur["device_id"] == "raspi_003" or capteur["device_id"] == "raspi_005" or capteur["device_id"] == "raspi_006":
+            anomaly = random.random() < 0.8  # Moderate anomaly rate
+            ip = random_ip_public()  # Change IP for each request
+        else:
+            anomaly =  random.random() < 0.05
 
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly, profile)
         system_data = generate_system_data(capteur["device_id"], ip, capteur["username"], anomaly)
@@ -135,6 +143,10 @@ def simulate_device_botnet(capteur):
 
         except Exception as e:
             print(f"❌ Network error for {capteur['device_id']}: {e}")
+        
+        cpu = psutil.cpu_percent(interval=1)
+        mem = psutil.virtual_memory().used / (1024*1024)
+        print(f"[{capteur['device_id']}] 🧠 CPU: {cpu}% | MEM: {mem:.2f} MB")
 
         time.sleep(random.randint(10, 20))
 

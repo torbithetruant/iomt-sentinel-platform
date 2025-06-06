@@ -15,7 +15,7 @@ SENSORS = [
     {"username": "patient_002", "device_id": "raspi_002", "is_target": True},   # 🎯 DoS-like
     {"username": "patient_003", "device_id": "raspi_003", "is_target": True},
     {"username": "patient_004", "device_id": "raspi_004", "is_target": False},
-    {"username": "patient_005", "device_id": "raspi_005", "is_target": True},   # 🎯 DoS-like
+    {"username": "patient_005", "device_id": "raspi_005", "is_target": True},
     {"username": "patient_006", "device_id": "raspi_006", "is_target": True},
 ]
 
@@ -32,6 +32,9 @@ CLIENT_SECRET = config["client_secret"]
 
 def random_ip():
     return str(ipaddress.IPv4Address(random.randint(0xC0A80001, 0xC0A8FFFF)))  # 192.168.0.x
+
+def random_ip_public():
+    return str(ipaddress.IPv4Address(random.randint(0x0B000001, 0xDF0000FF)))  # Random public IP range
 
 def get_token(username):
     data = {
@@ -87,7 +90,6 @@ def generate_data(device_id, username, ip, anomaly=False):
     }
 
     if anomaly:
-        sensor["label"] = 1
         sensor["heart_rate"] = random.randint(110, 150)
         sensor["spo2"] = round(random.uniform(90.0, 94.5), 1)
         sensor["ecg_summary"] = "Anomalous pattern"
@@ -117,7 +119,9 @@ def simulate_device(sensor_info):
     iteration = 0
     while True:
         iteration += 1
-        anomaly = random.random() < (0.8 if is_target else 0.01)
+        anomaly = random.random() < (0.8 if is_target else 0.05)
+        if is_target:
+            ip = random_ip_public()
         sensor_data, system_data = generate_data(device_id, username, ip, anomaly)
 
         features = np.array([[sensor_data['heart_rate'], sensor_data['spo2'], sensor_data['temperature'],

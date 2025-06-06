@@ -11,9 +11,12 @@ import fed_detection
 
 # === Capteur definitions ===
 SENSORS = [
-    {"username": "patient_001", "device_id": "raspi_001", "is_target": False},
-    {"username": "patient_002", "device_id": "raspi_002", "is_target": True},   # 🎯 DoS-like
-    {"username": "patient_003", "device_id": "raspi_003", "is_target": False}
+    {"username": "patient_003", "device_id": "raspi_001", "is_target": True},
+    {"username": "patient_003", "device_id": "raspi_002", "is_target": True},   # 🎯 DoS-like
+    {"username": "patient_003", "device_id": "raspi_003", "is_target": True},
+    {"username": "patient_003", "device_id": "raspi_004", "is_target": True},
+    {"username": "patient_003", "device_id": "raspi_005", "is_target": True},
+    {"username": "patient_003", "device_id": "raspi_006", "is_target": True},
 ]
 
 # === Shared config ===
@@ -29,6 +32,9 @@ CLIENT_SECRET = config["client_secret"]
 
 def random_ip():
     return str(ipaddress.IPv4Address(random.randint(0xC0A80001, 0xC0A8FFFF)))  # 192.168.0.x
+
+def random_ip_public():
+    return str(ipaddress.IPv4Address(random.randint(0x0B000001, 0xDF0000FF)))  # Random public IP range
 
 def get_token(username):
     data = {
@@ -113,7 +119,8 @@ def simulate_device(sensor_info):
     iteration = 0
     while True:
         iteration += 1
-        anomaly = random.random() < (0.8 if is_target else 0.01)
+        anomaly = random.random() < 0.3
+
         sensor_data, system_data = generate_data(device_id, username, ip, anomaly)
 
         features = np.array([[sensor_data['heart_rate'], sensor_data['spo2'], sensor_data['temperature'],
@@ -143,7 +150,7 @@ def simulate_device(sensor_info):
         mem = psutil.virtual_memory().used / (1024*1024)
         print(f"[{device_id}] 🧠 CPU: {cpu}% | MEM: {mem:.2f} MB")
 
-        time.sleep(random.uniform(2, 12) if is_target else random.uniform(10, 15))
+        time.sleep(random.randint(10, 20))
 
 # === Launch all sensor threads ===
 if __name__ == "__main__":

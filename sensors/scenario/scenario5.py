@@ -4,17 +4,18 @@ import time
 import requests
 from datetime import datetime
 import ipaddress
+import psutil
 
 # === CONFIGURATION GLOBALE ===
 KEYCLOAK_TOKEN_URL = "http://localhost:8080/realms/iot_realm/protocol/openid-connect/token"
 API_SENSOR_URL = "https://localhost:8000/api/sensor"
 API_SYSTEM_URL = "https://localhost:8000/api/system-status"
-CERT_PATH = "../server/certs/cert.pem"
+CERT_PATH = "../raspi/cert.pem"
 CLIENT_ID = "iot_backend"
 CLIENT_SECRET = "q1nMXKR6EKwafhEcDkeugyvgmbhGpbSp"
 
 # === SIMULATION PARAMS ===
-CAPTEURS = [{"username": "patient_003", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 10)]
+CAPTEURS = [{"username": "patient_003", "device_id": f"raspi_{str(i).zfill(3)}"} for i in range(1, 7)]
 
 PATIENT_PROFILES = [
     {"type": "sportif", "base_hr": 60, "base_spo2": 98, "base_temp": 36.3, "risk": 0.05},
@@ -65,7 +66,6 @@ def generate_sensor_data(device_id, anomaly=False, profile=None):
     if anomaly:
         anomaly_types = ["tachy", "hypoxie", "hyperBP", "hypoBP", "glycémie", "resp"]
         selected = random.sample(anomaly_types, k=random.randint(1, 2))
-        data["label"] = 1
 
         if "tachy" in selected:
             data["heart_rate"] = random.randint(110, 150)
@@ -143,7 +143,7 @@ def simulate_capteur(capteur):
     }
 
     while True:
-        anomaly = random.random() < 0.2 # Moderate anomalies (20%)
+        anomaly = random.random() < 0.3 # Moderate anomalies (20%)
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly, profile)
         system_data = generate_system_data(capteur["device_id"], ip, capteur["username"], anomaly)
 
@@ -161,6 +161,10 @@ def simulate_capteur(capteur):
 
         except Exception as e:
             print(f"❌ Network error for {capteur['device_id']}: {e}")
+
+        cpu = psutil.cpu_percent(interval=1)
+        mem = psutil.virtual_memory().used / (1024*1024)
+        print(f"[{capteur['device_id']}] 🧠 CPU: {cpu}% | MEM: {mem:.2f} MB")
 
         time.sleep(random.randint(10, 20))  # Adjusted for moderate pressure
 
