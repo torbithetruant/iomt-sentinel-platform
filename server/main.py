@@ -128,6 +128,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 json_data = json.loads(body)
                 device_id = json_data.get("device_id", "-")
                 alert = json_data.get("label", 0)
+                detec = json_data.get("ecg_summary","-")
             except:
                 logger.warning(f"{ip} {location} - {username} {device_id} \"{method} {path}\" [Invalid JSON] {user_agent}")
 
@@ -152,7 +153,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 device_match = result.scalar_one_or_none()
 
                 context = "[Normal Device]" if device_match else "[New Device Used]"
-                label = "[Alert]" if alert == 1 else "[Safe]"
+                label = "[Alert]" if alert or ("Anomalous" in detec) else "[Safe]"
                 log_message = f"{log_prefix} {context} {label} {user_agent} {duration}ms"
 
                 if alert:

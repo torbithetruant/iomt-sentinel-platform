@@ -166,7 +166,7 @@ def simulate_capteur(capteur):
         mem = psutil.virtual_memory().used / (1024*1024)
         print(f"[{capteur['device_id']}] 🧠 CPU: {cpu}% | MEM: {mem:.2f} MB")
 
-        time.sleep(random.randint(10, 20))  # Adjusted for moderate pressure
+        time.sleep(random.randint(10, 15))  # Adjusted for moderate pressure
 
 # === Start Threads ===
 for capteur in CAPTEURS:

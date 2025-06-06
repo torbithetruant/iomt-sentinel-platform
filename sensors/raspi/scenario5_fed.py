@@ -150,7 +150,7 @@ def simulate_device(sensor_info):
         mem = psutil.virtual_memory().used / (1024*1024)
         print(f"[{device_id}] 🧠 CPU: {cpu}% | MEM: {mem:.2f} MB")
 
-        time.sleep(random.randint(10, 20))
+        time.sleep(random.randint(10, 15))
 
 # === Launch all sensor threads ===
 if __name__ == "__main__":

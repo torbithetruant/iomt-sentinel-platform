@@ -96,10 +96,10 @@ def simulate_capteur(capteur, is_target=False):
     while True:
         if is_target:
             anomaly = random.random() < 0.8  # 80% anomalies for target device
-            sleep_time = random.uniform(10, 15)  # Faster loop = DoS effect
+            sleep_time = random.uniform(2, 5)  # Faster loop = DoS effect
         else:
             anomaly = random.random() < 0.01  # 1% anomalies for normal devices
-            sleep_time = random.uniform(15, 20)
+            sleep_time = random.uniform(6, 11)
 
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly)
         system_data = generate_system_data(capteur["device_id"], headers["X-Forwarded-For"], capteur["username"], anomaly)

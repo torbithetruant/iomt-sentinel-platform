@@ -128,8 +128,10 @@ def simulate_device_botnet(capteur):
         if capteur["device_id"] == "raspi_002" or capteur["device_id"] == "raspi_003" or capteur["device_id"] == "raspi_005" or capteur["device_id"] == "raspi_006":
             anomaly = random.random() < 0.8  # Moderate anomaly rate
             ip = random_ip_public()  # Change IP for each request
+            time_sleep = random.uniform(10, 15)
         else:
             anomaly =  random.random() < 0.05
+            time_sleep = random.uniform(15, 20)
 
         sensor_data = generate_sensor_data(capteur["device_id"], anomaly, profile)
         system_data = generate_system_data(capteur["device_id"], ip, capteur["username"], anomaly)
@@ -148,7 +150,7 @@ def simulate_device_botnet(capteur):
         mem = psutil.virtual_memory().used / (1024*1024)
         print(f"[{capteur['device_id']}] 🧠 CPU: {cpu}% | MEM: {mem:.2f} MB")
 
-        time.sleep(random.randint(10, 20))
+        time.sleep(time_sleep)
 
 # === Launch all devices ===
 for capteur in CAPTEURS:
