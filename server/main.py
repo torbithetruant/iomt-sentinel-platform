@@ -433,8 +433,14 @@ async def receive_fl_update(data: FLUpdate, db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/fl-model")
 async def get_fl_model():
-    with open("security/fed_learning/fl_global_model.json", "r") as f:
+    model_path = "security/fed_learning/fl_global_model.json"
+    
+    if not os.path.exists(model_path):
+        raise HTTPException(status_code=404, detail="FL global model not found")
+
+    with open(model_path, "r") as f:
         model_data = json.load(f)
+    
     return model_data
 
 

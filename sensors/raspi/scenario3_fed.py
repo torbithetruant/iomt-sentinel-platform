@@ -121,6 +121,15 @@ def simulate_device(sensor_info):
                               sensor_data['glucose_level'], sensor_data['respiration_rate']]])
         start = time.time()
         features_scaled = fed_detection.scaler.transform(features)
+
+        # Store the scaled features in the buffer for federated training
+        fed_detection.BUFFER[device_id].append(features_scaled.flatten())
+
+        # Keep buffer size manageable
+        if len(fed_detection.BUFFER[device_id]) > 200:
+            fed_detection.BUFFER[device_id] = fed_detection.BUFFER[device_id][-200:]
+
+
         reconstruction = fed_detection.model.predict(features_scaled)
         score = np.mean((features_scaled - reconstruction) ** 2)
         latency_local = time.time() - start

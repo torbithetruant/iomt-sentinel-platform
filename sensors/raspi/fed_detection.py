@@ -12,13 +12,12 @@ import hashlib
 from Cryptodome.Signature import pkcs1_15
 from Cryptodome.PublicKey import RSA
 from Cryptodome.Hash import SHA256
+from collections import defaultdict
 
-# === CONFIGURATION ===
 SERVER_URL = "https://localhost:8000"
 BUFFER = []
 ANOMALY_THRESHOLD = 1.74  # Seuil ajusté selon évaluation
 
-# === Modèle et scaler ===
 model = keras.models.load_model("autoencoder_model.h5")
 scaler = joblib.load("scaler.pkl")
 
@@ -36,7 +35,7 @@ def sign_gradients_and_zkp(gradients, private_key):
     h = SHA256.new(g_hash)
     signature = pkcs1_15.new(private_key).sign(h).hex()
     
-    # ZKP simplifié : challenge aléatoire + signature
+    # ZKP : challenge aléatoire + signature
     challenge = str(np.random.randint(100000, 999999))
     zkp_proof = hashlib.sha256((hash_hex + challenge).encode()).hexdigest()
     
@@ -54,8 +53,8 @@ def fl_loop(device_id, token):
             print("[FL] Modèle global mis à jour")
 
         # Fine-tuning sur données locales
-        if len(BUFFER) >= 50:
-            X_local = np.array(BUFFER)
+        if len(BUFFER[device_id]) >= 50:
+            X_local = np.array(BUFFER[device_id])
             model.fit(X_local, X_local, epochs=3, batch_size=16, verbose=0)
             print("[FL] Fine-tuning local terminé")
 
@@ -77,4 +76,6 @@ def fl_loop(device_id, token):
             grad_size = len(json.dumps(flat_weights).encode())
             print(f"[FL] Gradient payload size: {grad_size} bytes")
 
-        time.sleep(600)  # 10 min
+            time.sleep(600)  # 10 min
+        else :
+            time.sleep(60)  # 1 min
