@@ -14,12 +14,11 @@ server/security/__pycache__/
 server/database/__pycache__/
 
 # Fichiers sensibles ou scripts locaux
-config/logs/
-
-logs/
 
 # Logs
 server/logs/*.log
+
+server/logs/scripts/__pycache__/
 
 # Database
 server/data.db
