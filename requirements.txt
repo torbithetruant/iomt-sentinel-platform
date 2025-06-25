@@ -15,3 +15,4 @@ pycryptodomex
 tensorflow
 joblib
 scikit-learn
+httpx
