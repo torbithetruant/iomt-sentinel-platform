@@ -18,9 +18,6 @@ config/logs/
 
 logs/
 
-# Fichiers de lancement
-server/launcher.sh
-
 # Logs
 server/logs/*.log
 
@@ -28,6 +25,6 @@ server/logs/*.log
 server/data.db
 
 # Copyright
-server/database/GeoLite2-City.mmdb
+# server/database/GeoLite2-City.mmdb
 
 sensors/raspi/__pycache__
