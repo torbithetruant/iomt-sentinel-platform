@@ -108,6 +108,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
         location = get_ip_location(ip) if not is_private_ip(ip) else "Private IP"
         username = "-"
+        roles = ["-"]
         device_id = "-"
         alert = 0
 
@@ -118,8 +119,10 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             try:
                 payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, algorithms=[ALGORITHM], options={"verify_aud": False, "verify_iss": True})
                 username = payload.get("preferred_username", "-")
+                allowed_roles = {"patient", "doctor", "it_admin"}
+                roles = [role for role in payload.get("realm_access", {}).get("roles", []) if role in allowed_roles]
             except JWTError:
-                logger.warning(f"{ip} {location} - {username} {device_id} \"{method} {path}\" [Invalid Token] {user_agent}")
+                logger.warning(f"{ip} {location} - {username} {device_id} {roles[0]} \"{method} {path}\" [Invalid Token] {user_agent}")
 
         if method in ("POST", "PUT") and not path.startswith("/login"):
             try:
@@ -130,14 +133,14 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
                 alert = json_data.get("label", 0)
                 detec = json_data.get("ecg_summary","-")
             except:
-                logger.warning(f"{ip} {location} - {username} {device_id} \"{method} {path}\" [Invalid JSON] {user_agent}")
+                logger.warning(f"{ip} {location} - {username} {device_id} {roles[0]} \"{method} {path}\" [Invalid JSON] {user_agent}")
 
         response = await call_next(request)
         duration = round((time.time() - start_time) * 1000)
         action, rate = get_user_action_and_rate(username, path)
 
         # Prépare le préfixe commun du log
-        log_prefix = f'[Action : {action}] {ip} ({location}) - {username} {device_id} "{method} {path}" {response.status_code} [Request rate: {rate}/min]'
+        log_prefix = f'[Action : {action}] {ip} ({location}) - {username} {device_id} {roles[0]} "{method} {path}" {response.status_code} [Request rate: {rate}/min]'
 
         # Gestion des logs en fonction du chemin
         if path.startswith("/login") and method == "POST":

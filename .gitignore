@@ -7,11 +7,11 @@ llm_server/llm/bert-supervisor/
 # server/certs/
 
 # Cache Python
-server/__pycache__/
-
 server/security/__pycache__/
 
 server/database/__pycache__/
+
+server/__pycache__/
 
 # Fichiers sensibles ou scripts locaux
 

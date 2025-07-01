@@ -73,7 +73,7 @@ def build_context_from_logs(log_group):
 
         if rate != "?/min":
             # if rate is more than 5 requests per minute, flag it as suspicious
-            if int(rate.split("/")[0]) > 5:
+            if int(rate.split("/")[0]) > 8:
                 sentence += f"This request rate is suspicious ({rate})."
             else:
                 sentence += f"Request rate is normal ({rate})."
@@ -113,9 +113,10 @@ def parse_last_logs_from_raw_file(log_source, block_size=10):
             location_match = re.search(r"\(([^)]+)\)", line)
             location = location_match.group(1) if location_match else "unknown_location"
 
-            user_device_match = re.search(r"- (\S+) (\S+)", line)
+            user_device_match = re.search(r"- (\S+) (\S+) (\S+)", line)
             user = user_device_match.group(1) if user_device_match else "unknown_user"
             device = user_device_match.group(2) if user_device_match else "unknown_device"
+            role = user_device_match.group(3) if user_device_match else "unknown_role"
 
             request_match = re.search(r"\"(GET|POST|PUT|DELETE) [^\"]+\"", line)
             request = request_match.group() if request_match else "UNKNOWN"
@@ -152,6 +153,7 @@ def parse_last_logs_from_raw_file(log_source, block_size=10):
                 "location": location,
                 "user": user,
                 "device": device,
+                "role": role,
                 "endpoint": request,
                 "status": status_code,
                 "status_tag": alert,
@@ -355,3 +357,362 @@ def extract_anomaly_causes(context: str):
     return anomalies
 
 
+def detect_behavioral_patterns(logs):
+    """Detect behavioral patterns from logs."""
+    
+    patterns = []
+    
+    # Count different types of activities
+    failed_logins = sum(1 for log in logs if "Login Failed" in log.get("detection", ""))
+    successful_logins = sum(1 for log in logs if "/login" in log.get("endpoint", "") and "Login Failed" not in log.get("detection", ""))
+    device_mismatches = sum(1 for log in logs if "Wrong User's Device" in log.get("detection", ""))
+    high_rate_requests = sum(1 for log in logs if is_high_rate(log.get("rate", "")))
+    data_uploads = sum(1 for log in logs if "/api/sensor" in log.get("endpoint", ""))
+    external_access = sum(1 for log in logs if log.get("location", "") != "Private IP")
+    
+    # Pattern detection
+    if failed_logins >= 3:
+        patterns.append("repeated login failures")
+    elif failed_logins >= 1 and successful_logins == 0:
+        patterns.append("login attempts without success")
+    
+    if device_mismatches > 0:
+        patterns.append("device identity mismatch")
+    
+    if high_rate_requests > 0:
+        patterns.append("high frequency requests")
+    
+    if external_access > 0 and failed_logins > 0:
+        patterns.append("external access with authentication issues")
+    
+    if data_uploads > 0 and device_mismatches > 0:
+        patterns.append("suspicious data upload activity")
+    
+    # Check for scanning patterns
+    unique_endpoints = len(set(log.get("endpoint", "/") for log in logs))
+    if unique_endpoints >= 5:
+        patterns.append("endpoint reconnaissance")
+    
+    # Check for normal activity
+    if not patterns and successful_logins > 0 and failed_logins == 0:
+        patterns.append("normal user activity")
+    
+    return patterns
+
+
+def format_log_activity(log, include_user=False):
+    """Format a single log entry as activity description."""
+    
+    endpoint = log.get("endpoint", "/")
+    status = log.get("status", "")
+    detection = log.get("detection", "")
+    device = log.get("device", "")
+    rate = log.get("rate", "")
+    
+    # Build activity description
+    activity = ""
+    
+    if "/login" in endpoint:
+        if "Login Failed" in detection:
+            activity = "Login failed"
+        else:
+            activity = "Successfully logged in"
+    
+    elif "/dashboard" in endpoint:
+        if "Access Failed" in detection:
+            activity = "Dashboard access denied"
+        else:
+            activity = "Accessed dashboard"
+    
+    elif "/api/sensor" in endpoint:
+        activity = f"Uploaded medical data"
+        if device:
+            activity += f" from device {device}"
+    
+    elif "/api/system-status" in endpoint:
+        activity = f"Sent system status"
+        if device:
+            activity += f" from device {device}"
+    
+    elif "/api/fl-update" in endpoint:
+        activity = "Attempted system update"
+    
+    elif "GET" in endpoint and endpoint != "/":
+        if status == "200":
+            activity = f"Accessed {endpoint.split('/')[-1]} page"
+        else:
+            activity = f"Failed to access {endpoint.split('/')[-1]} page"
+    
+    elif endpoint == "/" or "home" in endpoint:
+        activity = "Accessed home page"
+    
+    else:
+        activity = f"Made request to {endpoint}"
+    
+    # Add additional context
+    context_items = []
+    
+    if detection and detection not in ["Login Failed", "Access Failed"]:
+        context_items.append(f"Alert: {detection}")
+    
+    if rate and is_high_rate(rate):
+        context_items.append(f"{rate}")
+    
+    if context_items:
+        activity += f" ({', '.join(context_items)})"
+    
+    return activity
+
+
+
+def calculate_time_span(logs):
+    """Calculate time span of session."""
+    
+    timestamps = [log.get("timestamp", "") for log in logs if log.get("timestamp", "")]
+    if len(timestamps) < 2:
+        return None
+    
+    try:
+        # Extract time parts and calculate span
+        times = []
+        for ts in timestamps:
+            if " " in ts:
+                time_part = ts.split(" ")[1]
+                if ":" in time_part:
+                    hour, minute, second = map(int, time_part.split(":"))
+                    total_seconds = hour * 3600 + minute * 60 + second
+                    times.append(total_seconds)
+        
+        if len(times) >= 2:
+            span_seconds = max(times) - min(times)
+            if span_seconds < 60:
+                return f"{span_seconds} seconds"
+            elif span_seconds < 3600:
+                return f"{span_seconds // 60} minutes"
+            else:
+                return f"{span_seconds // 3600} hours {(span_seconds % 3600) // 60} minutes"
+    
+    except (ValueError, IndexError):
+        pass
+    
+    return None
+
+def extract_time(timestamp):
+    """Extract time portion from timestamp."""
+    if not timestamp:
+        return "unknown"
+    
+    if " " in timestamp:
+        return timestamp.split(" ")[1]
+    elif ":" in timestamp:
+        return timestamp
+    else:
+        return timestamp
+
+
+def is_high_rate(rate_str):
+    """Check if request rate is suspicious."""
+    if not rate_str or rate_str == "?/min":
+        return False
+    try:
+        rate_num = int(rate_str.split("/")[0])
+        return rate_num > 5
+    except (ValueError, IndexError):
+        return False
+
+
+def build_user_session_summary(user, logs):
+    """Build session summary for a specific user."""
+    
+    if not logs:
+        return ""
+    
+    # Extract session metadata
+    ips = list(set(log.get("ip", "unknown") for log in logs))
+    locations = list(set(log.get("location", "unknown") for log in logs if log.get("location", "unknown") != "unknown"))
+    user_agents = list(set(log.get("user_agent", "unknown") for log in logs if log.get("user_agent", "unknown") != "unknown"))
+    devices = list(set(log.get("device", "") for log in logs if log.get("device", "")))
+    roles = list(set(log.get("role", "unknown") for log in logs if log.get("role", "unknown") != "unknown"))
+    
+    # Calculate request rate
+    total_requests = len(logs)
+    time_span = calculate_time_span(logs)
+    request_rate = f"{total_requests} requests" + (f" in {time_span}" if time_span else "")
+    
+    # Detect behavioral patterns
+    patterns = detect_behavioral_patterns(logs)
+    
+    # Build header
+    primary_ip = ips[0] if ips else "unknown"
+    primary_location = locations[0] if locations else "Unknown"
+    primary_agent = user_agents[0] if user_agents else "Unknown"
+    
+    header = f"Session Summary - User: {user}\n"
+    header += f"IP: {primary_ip}"
+    if len(ips) > 1:
+        header += f" (+{len(ips)-1} others)"
+    
+    header += f" | Browser: {primary_agent} | Location: {primary_location}"
+    if len(locations) > 1:
+        header += f" (+{len(locations)-1} others)"
+    
+    header += f" | {request_rate}"
+    
+    if devices:
+        header += f" | Devices: {', '.join(devices[:2])}"
+        if len(devices) > 2:
+            header += f" (+{len(devices)-2} more)"
+    
+    # Add behavioral patterns
+    if patterns:
+        header += f"\nBehavioral pattern: {', '.join(patterns)}"
+    
+    # Build activity log
+    header += "\nLog Activity:"
+    
+    activities = []
+    for log in logs:
+        time_str = extract_time(log.get("timestamp", ""))
+        activity = format_log_activity(log)
+        if activity:
+            activities.append(f"- [{time_str}] {activity}")
+    
+    return header + "\n" + "\n".join(activities)
+
+
+def build_session_summaries(log_group, max_users=5, max_logs_per_user=10):
+    """
+    Build session summaries for each user from log group.
+    Groups logs by user and creates structured summaries.
+    """
+    
+    # Group logs by user
+    user_logs = {}
+    unknown_user_logs = []
+    
+    for log in log_group:
+        user = log.get("user", "").strip()
+        if user and user not in ["unknown_user", "unknown", ""]:
+            if user not in user_logs:
+                user_logs[user] = []
+            user_logs[user].append(log)
+        else:
+            unknown_user_logs.append(log)
+    
+    summaries = []
+    
+    # Create summary for each identified user
+    for user, logs in list(user_logs.items())[:max_users]:
+        # Sort by timestamp and take last N logs
+        sorted_logs = sorted(logs, key=lambda x: x.get("timestamp", ""))[-max_logs_per_user:]
+        summary = build_user_session_summary(user, sorted_logs)
+        summaries.append(summary)
+    
+    # Aggregate unknown users if any
+    if unknown_user_logs:
+        sorted_unknown = sorted(unknown_user_logs, key=lambda x: x.get("timestamp", ""))[-max_logs_per_user:]
+        summary = build_aggregate_session_summary(sorted_unknown)
+        summaries.append(summary)
+    
+    return "\n\n".join(summaries)
+
+
+def build_user_session_summary(user, logs):
+    """Build session summary for a specific user."""
+    
+    if not logs:
+        return ""
+    
+    # Extract session metadata
+    ips = list(set(log.get("ip", "unknown") for log in logs))
+    locations = list(set(log.get("location", "unknown") for log in logs if log.get("location", "unknown") != "unknown"))
+    user_agents = list(set(log.get("user_agent", "unknown") for log in logs if log.get("user_agent", "unknown") != "unknown"))
+    devices = list(set(log.get("device", "") for log in logs if log.get("device", "")))
+    
+    # Calculate request rate
+    total_requests = len(logs)
+    time_span = calculate_time_span(logs)
+    request_rate = f"{total_requests} requests" + (f" in {time_span}" if time_span else "")
+    
+    # Detect behavioral patterns
+    patterns = detect_behavioral_patterns(logs)
+    
+    # Build header
+    primary_ip = ips[0] if ips else "unknown"
+    primary_location = locations[0] if locations else "Unknown"
+    primary_agent = user_agents[0] if user_agents else "Unknown"
+    
+    header = f"Session Summary - User: {user}\n"
+    header += f"IP: {primary_ip}"
+    if len(ips) > 1:
+        header += f" (+{len(ips)-1} others)"
+    
+    header += f" | Browser: {primary_agent} | Location: {primary_location}"
+    if len(locations) > 1:
+        header += f" (+{len(locations)-1} others)"
+    
+    header += f" | {request_rate}"
+    
+    if devices:
+        header += f" | Devices: {', '.join(devices[:2])}"
+        if len(devices) > 2:
+            header += f" (+{len(devices)-2} more)"
+    
+    # Add behavioral patterns
+    if patterns:
+        header += f"\nBehavioral pattern: {', '.join(patterns)}"
+    
+    # Build activity log
+    header += "\nLog Activity:"
+    
+    activities = []
+    for log in logs:
+        time_str = extract_time(log.get("timestamp", ""))
+        activity = format_log_activity(log)
+        if activity:
+            activities.append(f"- [{time_str}] {activity}")
+    
+    return header + "\n" + "\n".join(activities)
+
+
+def build_aggregate_session_summary(logs):
+    """Build aggregated summary for unknown/mixed users."""
+    
+    if not logs:
+        return ""
+    
+    # Extract session metadata
+    ips = list(set(log.get("ip", "unknown") for log in logs))
+    locations = list(set(log.get("location", "unknown") for log in logs if log.get("location", "unknown") != "unknown"))
+    user_agents = list(set(log.get("user_agent", "unknown") for log in logs if log.get("user_agent", "unknown") != "unknown"))
+    
+    # Calculate request rate
+    total_requests = len(logs)
+    time_span = calculate_time_span(logs)
+    request_rate = f"{total_requests} requests" + (f" in {time_span}" if time_span else "")
+    
+    # Detect behavioral patterns
+    patterns = detect_behavioral_patterns(logs)
+    
+    # Build header
+    header = f"Session Summary - Mixed/Unknown Users\n"
+    header += f"IPs: {len(ips)} unique ({', '.join(ips[:3])}{'...' if len(ips) > 3 else ''})"
+    header += f" | Locations: {len(locations)} unique"
+    header += f" | {request_rate}"
+    
+    # Add behavioral patterns
+    if patterns:
+        header += f"\nBehavioral pattern: {', '.join(patterns)}"
+    
+    # Build activity log
+    header += "\nLog Activity:"
+    
+    activities = []
+    for log in logs:
+        time_str = extract_time(log.get("timestamp", ""))
+        user = log.get("user", "unknown")
+        activity = format_log_activity(log, include_user=True)
+        if activity:
+            activities.append(f"- [{time_str}] {user}: {activity}")
+    
+    return header + "\n" + "\n".join(activities)
